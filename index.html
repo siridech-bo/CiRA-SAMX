@@ -381,7 +381,7 @@
     </div>
     <div class="btn-row">
       <button id="btnBox" class="btn" onclick="setMode('box')">▢ Box</button>
-      <button id="btnPrompt" class="btn" onclick="setMode('prompt')" style="display:none">💬 Prompt</button>
+      <button id="btnPrompt" class="btn" onclick="setMode('prompt')" style="display:none" title="Text prompts require a tokenizer not included in the ONNX export">💬 Prompt (N/A)</button>
     </div>
   </div>
 
@@ -662,7 +662,8 @@ function updateModeButtons() {
   // Show/hide prompt button based on selected model
   const promptBtn = $('btnPrompt');
   if (promptBtn) {
-    promptBtn.style.display = selectedModel === 'sam3' ? '' : 'none';
+    // Text prompt disabled — ONNX tracker models don't include tokenizer
+    promptBtn.style.display = 'none';
     if (currentMode === 'prompt' && selectedModel !== 'sam3') {
       setMode('positive');
     }
@@ -755,13 +756,16 @@ self.onmessage = async (e) => {
       const rgba = new Uint8ClampedArray(imageData);
       currentRawImage = new RawImage(rgba, width, height, 4);
 
+      // Clone raw image data so processor doesn't mutate the original
+      const rawClone = new RawImage(new Uint8ClampedArray(rgba), width, height, 4);
+
       if (API === 'sam1') {
-        cachedProcessorInputs = await processor(currentRawImage);
+        cachedProcessorInputs = await processor(rawClone);
         imageEmbeddings = await model.get_image_embeddings(cachedProcessorInputs);
         imageOriginalSizes = cachedProcessorInputs.original_sizes;
         imageReshapedSizes = cachedProcessorInputs.reshaped_input_sizes;
       } else {
-        cachedProcessorInputs = await processor(currentRawImage);
+        cachedProcessorInputs = await processor(rawClone);
         imageEmbeddings = await model.get_image_embeddings(cachedProcessorInputs);
         imageOriginalSizes = cachedProcessorInputs.original_sizes;
         imageReshapedSizes = cachedProcessorInputs.reshaped_input_sizes;
@@ -776,38 +780,46 @@ self.onmessage = async (e) => {
 
       let maskData, maskW, maskH, score;
 
-      // --- Use processor for prompt formatting (CPU-only, fast) ---
-      // The processor handles coordinate scaling, tensor shaping, and data types.
-      // We then merge with cached imageEmbeddings so the model skips the encoder.
       const hasPoints = points && points.length > 0;
       const hasBox = box && box.length === 4;
 
-      const procOpts = {};
+      // Build prompt arrays in original pixel coordinates
+      let promptPoints = null, promptLabels = null, promptBoxes = null;
+
+      if (!hasPoints && !hasBox && msg.textPrompt) {
+        const imgW = currentRawImage.width;
+        const imgH = currentRawImage.height;
+        promptPoints = [[[Math.round(imgW/2), Math.round(imgH/2)]]];
+        promptLabels = [[1]];
+        self.postMessage({ type: 'DEBUG', message: 'Prompt-only: center point fallback' });
+      }
       if (hasPoints) {
-        if (API === 'sam1') {
-          procOpts.input_points = [points.map(p => [p[0], p[1]])];
-          procOpts.input_labels = [labels];
-        } else {
-          procOpts.input_points = [[points.map(p => [p[0], p[1]])]];
-          procOpts.input_labels = [[labels]];
-        }
+        promptPoints = [points.map(p => [p[0], p[1]])];
+        promptLabels = [labels];
       }
       if (hasBox) {
-        if (API === 'sam1') {
-          procOpts.input_boxes = [[box]];
-          if (!hasPoints) {
-            const cx = Math.round((box[0] + box[2]) / 2);
-            const cy = Math.round((box[1] + box[3]) / 2);
-            procOpts.input_points = [[[cx, cy]]];
-            procOpts.input_labels = [[1]];
-          }
-        } else {
-          procOpts.input_boxes = [[[box[0], box[1], box[2], box[3]]]];
+        promptBoxes = [[box]];
+        if (!hasPoints && !promptPoints) {
+          const cx = Math.round((box[0] + box[2]) / 2);
+          const cy = Math.round((box[1] + box[3]) / 2);
+          promptPoints = [[[cx, cy]]];
+          promptLabels = [[1]];
         }
       }
 
-      // Processor formats prompts + re-processes image (CPU resize, ~50ms)
+      // Build procOpts for processor call
+      const procOpts = {};
+      if (promptPoints) {
+        procOpts.input_points = promptPoints;
+        procOpts.input_labels = promptLabels;
+      }
+      if (promptBoxes) {
+        procOpts.input_boxes = promptBoxes;
+      }
+
+      // Full processor call — handles image + prompt formatting
       const inputs = await processor(currentRawImage, procOpts);
+
       // Merge with cached encoder output — model skips encoder, runs decoder only
       const modelInputs = { ...inputs, ...imageEmbeddings };
 
@@ -839,8 +851,9 @@ self.onmessage = async (e) => {
         ' | iou: ' + JSON.stringify((outputs.iou_scores || outputs.pred_iou_scores)?.dims)
       });
 
+      // Use CACHED sizes (matching the embeddings) for mask post-processing
       const masks = await processor.post_process_masks(
-        outputs.pred_masks, inputs.original_sizes, inputs.reshaped_input_sizes
+        outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
       );
       const result = extractMask(masks, outputs);
       maskData = result.maskData; maskW = result.maskW;
