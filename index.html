@@ -694,6 +694,7 @@ let imageEmbeddings = null;
 let currentRawImage = null;
 let imageOriginalSizes = null;
 let imageReshapedSizes = null;
+let cachedProcessorInputs = null;
 
 function progressCallback(p) {
   if (p.status === 'progress' && p.progress !== undefined) {
@@ -755,18 +756,15 @@ self.onmessage = async (e) => {
       currentRawImage = new RawImage(rgba, width, height, 4);
 
       if (API === 'sam1') {
-        // SAM1: explicit image embedding step
-        const inputs = await processor(currentRawImage);
-        imageEmbeddings = await model.get_image_embeddings(inputs);
-        // Save real image sizes for post_process_masks later
-        imageOriginalSizes = inputs.original_sizes;
-        imageReshapedSizes = inputs.reshaped_input_sizes;
+        cachedProcessorInputs = await processor(currentRawImage);
+        imageEmbeddings = await model.get_image_embeddings(cachedProcessorInputs);
+        imageOriginalSizes = cachedProcessorInputs.original_sizes;
+        imageReshapedSizes = cachedProcessorInputs.reshaped_input_sizes;
       } else {
-        // SAM2/SAM3: pre-encode image and cache features
-        const inputs = await processor(currentRawImage);
-        imageEmbeddings = await model.get_image_embeddings(inputs);
-        imageOriginalSizes = inputs.original_sizes;
-        imageReshapedSizes = inputs.reshaped_input_sizes;
+        cachedProcessorInputs = await processor(currentRawImage);
+        imageEmbeddings = await model.get_image_embeddings(cachedProcessorInputs);
+        imageOriginalSizes = cachedProcessorInputs.original_sizes;
+        imageReshapedSizes = cachedProcessorInputs.reshaped_input_sizes;
       }
 
       const encoderTime = Math.round(performance.now() - t0);
@@ -778,39 +776,83 @@ self.onmessage = async (e) => {
 
       let maskData, maskW, maskH, score;
 
-      // Build processor options
-      const procOpts = {};
+      // --- Build prompt tensors manually (no image re-processing) ---
+      const reshapedH = Number(imageReshapedSizes.data[0]);
+      const reshapedW = Number(imageReshapedSizes.data[1]);
+
+      let modelInputs = { ...cachedProcessorInputs, ...imageEmbeddings };
+
       const hasPoints = points && points.length > 0;
       const hasBox = box && box.length === 4;
 
       if (hasPoints) {
+        const normalizedPts = points.map(p => [p[0] / reshapedW, p[1] / reshapedH]);
         if (API === 'sam1') {
-          // SAM1: input_points [batch, nb_points, 2], input_labels [batch, nb_points]
-          procOpts.input_points = [points.map(p => [p[0], p[1]])];
-          procOpts.input_labels = [labels];
+          modelInputs.input_points = new Tensor('float32',
+            new Float32Array(normalizedPts.flat()), [1, normalizedPts.length, 2]);
+          modelInputs.input_labels = new Tensor('int64',
+            BigInt64Array.from(labels.map(BigInt)), [1, labels.length]);
         } else {
-          // SAM2/3: input_points [point_batch_size, nb_points, 2] (3D, auto-expanded to 4D)
-          procOpts.input_points = [[points.map(p => [p[0], p[1]])]];
-          procOpts.input_labels = [[labels]];
+          modelInputs.input_points = new Tensor('float32',
+            new Float32Array(normalizedPts.flat()), [1, 1, normalizedPts.length, 2]);
+          modelInputs.input_labels = new Tensor('int64',
+            BigInt64Array.from(labels.map(BigInt)), [1, 1, labels.length]);
         }
       }
 
       if (hasBox) {
+        const [x1, y1, x2, y2] = box;
         if (API === 'sam1') {
-          procOpts.input_boxes = [[box]];
-          // SAM1 requires input_points — add box center as positive point if none provided
+          modelInputs.input_boxes = new Tensor('float32',
+            new Float32Array([x1 / reshapedW, y1 / reshapedH, x2 / reshapedW, y2 / reshapedH]), [1, 1, 4]);
           if (!hasPoints) {
-            const cx = Math.round((box[0] + box[2]) / 2);
-            const cy = Math.round((box[1] + box[3]) / 2);
-            procOpts.input_points = [[[cx, cy]]];
-            procOpts.input_labels = [[1]];
+            const cx = (x1 + x2) / 2 / reshapedW;
+            const cy = (y1 + y2) / 2 / reshapedH;
+            modelInputs.input_points = new Tensor('float32',
+              new Float32Array([cx, cy]), [1, 1, 2]);
+            modelInputs.input_labels = new Tensor('int64',
+              BigInt64Array.from([1n]), [1, 1]);
           }
         } else {
-          // SAM2/3: input_boxes shape [batch, num_boxes, 4]
-          procOpts.input_boxes = [[[box[0], box[1], box[2], box[3]]]];
-          // SAM2/3 handles box-only natively — no need for dummy points
+          modelInputs.input_boxes = new Tensor('float32',
+            new Float32Array([x1 / reshapedW, y1 / reshapedH, x2 / reshapedW, y2 / reshapedH]), [1, 1, 1, 4]);
         }
       }
+
+      // Text prompt (SAM3 only)
+      if (msg.textPrompt && API === 'sam3') {
+        try {
+          const { AutoTokenizer } = await import(
+            'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js'
+          );
+          if (!self._tokenizer) {
+            self._tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
+          }
+          const textInputs = await self._tokenizer(msg.textPrompt, {
+            padding: true, truncation: true
+          });
+          modelInputs = { ...modelInputs, ...textInputs };
+          self.postMessage({ type: 'DEBUG', message: 'SAM3 text inputs keys: ' + Object.keys(textInputs).join(', ') });
+        } catch (tokErr) {
+          self.postMessage({ type: 'DEBUG', message: 'SAM3 tokenizer warning: ' + tokErr.message + ' — running without text tokens' });
+        }
+      }
+
+      // Run model — encoder is skipped because imageEmbeddings keys are present
+      const outputs = await model(modelInputs);
+
+      self.postMessage({ type: 'DEBUG', message: API.toUpperCase() +
+        ' outputs keys: ' + Object.keys(outputs).join(', ') +
+        ' | pred_masks: ' + JSON.stringify(outputs.pred_masks?.dims) +
+        ' | iou: ' + JSON.stringify((outputs.iou_scores || outputs.pred_iou_scores)?.dims)
+      });
+
+      const masks = await processor.post_process_masks(
+        outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
+      );
+      const result = extractMask(masks, outputs);
+      maskData = result.maskData; maskW = result.maskW;
+      maskH = result.maskH; score = result.score;
 
       function extractMask(masks, outputs) {
         // masks[0] is a tensor with dims [numMasks, H, W] (e.g. [3, 600, 900])
@@ -861,29 +903,6 @@ self.onmessage = async (e) => {
           const md = Array.from(maskContainer.data);
           return { maskData: md, maskW: w, maskH: h, score: scores[0] };
         }
-      }
-
-      if (API === 'sam1') {
-        const inputs = await processor(currentRawImage, procOpts);
-        self.postMessage({ type: 'DEBUG', message: 'SAM1 inputs keys: ' + Object.keys(inputs).join(', ') });
-        const outputs = await model({ ...inputs, ...imageEmbeddings });
-        self.postMessage({ type: 'DEBUG', message: 'SAM1 outputs keys: ' + Object.keys(outputs).join(', ') + ', pred_masks dims: ' + JSON.stringify(outputs.pred_masks?.dims) + ', iou dims: ' + JSON.stringify(outputs.iou_scores?.dims) });
-        const masks = await processor.post_process_masks(
-          outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
-        );
-        self.postMessage({ type: 'DEBUG', message: 'masks type: ' + typeof masks + ', isArray: ' + Array.isArray(masks) + ', length: ' + (masks?.length) + ', [0] type: ' + typeof masks?.[0] + ', [0] length: ' + masks?.[0]?.length + ', [0][0] type: ' + typeof masks?.[0]?.[0] + ', [0][0] dims: ' + JSON.stringify(masks?.[0]?.[0]?.dims) });
-        const result = extractMask(masks, outputs);
-        maskData = result.maskData; maskW = result.maskW; maskH = result.maskH; score = result.score;
-      } else {
-        // SAM2/SAM3: re-use cached image embeddings, only run decoder
-        const inputs = await processor(currentRawImage, procOpts);
-        const outputs = await model({ ...inputs, ...imageEmbeddings });
-        self.postMessage({ type: 'DEBUG', message: 'SAM2/3 outputs keys: ' + Object.keys(outputs).join(', ') + ', pred_masks dims: ' + JSON.stringify(outputs.pred_masks?.dims) + ', pred_iou_scores dims: ' + JSON.stringify(outputs.pred_iou_scores?.dims) + ', iou_scores dims: ' + JSON.stringify(outputs.iou_scores?.dims) });
-        const masks = await processor.post_process_masks(
-          outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
-        );
-        const result = extractMask(masks, outputs);
-        maskData = result.maskData; maskW = result.maskW; maskH = result.maskH; score = result.score;
       }
 
       const decoderTime = Math.round(performance.now() - t0);
@@ -1242,7 +1261,11 @@ function runPredict() {
 
   const hasPoints = points.length > 0;
   const hasBox = !!currentBox;
-  if (!hasPoints && !hasBox) return;
+  const textPrompt = (currentMode === 'prompt' && $('promptInput'))
+    ? $('promptInput').value.trim() : '';
+  const hasPrompt = !!textPrompt;
+
+  if (!hasPoints && !hasBox && !hasPrompt) return;
 
   isPredicting = true;
   const reqId = 'req_' + (++requestCounter) + '_' + Date.now();
@@ -1254,6 +1277,9 @@ function runPredict() {
   }
   if (hasBox) {
     msg.box = [currentBox.x1, currentBox.y1, currentBox.x2, currentBox.y2];
+  }
+  if (hasPrompt) {
+    msg.textPrompt = textPrompt;
   }
 
   worker.postMessage(msg);
