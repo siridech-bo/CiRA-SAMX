@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAM Browser Test — SAM1 / SAM2 / SAM3</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3350;
+    --accent: #6366f1;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 420px;
+    min-width: 420px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sidebar-header h1 {
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .badge-webgpu { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge-wasm { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+  .section {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text2);
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  /* Status panel */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--text2);
+    flex-shrink: 0;
+  }
+  .status-dot.loading { background: var(--yellow); animation: pulse 1s ease-in-out infinite; }
+  .status-dot.ready { background: var(--green); }
+  .status-dot.error { background: var(--red); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .status-text { font-size: 13px; font-weight: 600; }
+  .status-sub { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
+  .progress-wrap {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 4px;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.2s;
+  }
+  .progress-msg { font-size: 10px; color: var(--text2); min-height: 14px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    width: 100%;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.active-green { border-color: var(--green); background: rgba(34,197,94,0.1); color: var(--green); }
+  .btn.active-yellow { border-color: var(--yellow); background: rgba(234,179,8,0.1); color: var(--yellow); }
+  .btn.active-accent { border-color: var(--accent); background: rgba(99,102,241,0.1); color: var(--accent); }
+  .btn.active-red { border-color: var(--red); background: rgba(239,68,68,0.1); color: var(--red); }
+
+  .btn-row { display: flex; gap: 6px; }
+  .btn-row .btn { width: 50%; }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .gpu-name { font-size: 10px; color: var(--text2); margin-top: 4px; }
+
+  /* Model selector */
+  .model-select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+  .model-select:hover { border-color: var(--accent); }
+  .model-select:disabled { opacity: 0.4; cursor: not-allowed; }
+  .model-desc { font-size: 10px; color: var(--text2); margin-top: 6px; line-height: 1.4; }
+
+  /* Points list */
+  .points-list {
+    max-height: 120px;
+    overflow-y: auto;
+    margin-bottom: 6px;
+  }
+  .point-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .point-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Perf panel */
+  .perf-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+  .perf-label { color: var(--text2); }
+  .perf-value { font-weight: 600; font-family: 'SF Mono', 'Cascadia Code', monospace; }
+  .perf-green { color: var(--green); }
+  .perf-yellow { color: var(--yellow); }
+  .perf-red { color: var(--red); }
+
+  /* Log panel */
+  .log-panel {
+    flex: 1;
+    min-height: 200px;
+    overflow-y: auto;
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 10px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .log-line { white-space: pre-wrap; word-break: break-all; padding: 1px 0; }
+
+  /* Segment button */
+  .btn-segment {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 12px 14px;
+    letter-spacing: 0.5px;
+  }
+  .btn-segment:hover { background: #5558e6; border-color: #5558e6; }
+  .btn-segment:disabled { background: var(--surface2); border-color: var(--border); color: var(--text2); }
+  .btn-segment.running { background: var(--yellow); border-color: var(--yellow); color: #000; animation: pulse 1s ease-in-out infinite; }
+  .log-ts { color: var(--accent); }
+  .log-ok { color: var(--green); }
+  .log-warn { color: var(--yellow); }
+  .log-err { color: var(--red); }
+  .log-info { color: var(--text2); }
+
+  /* Main area */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    position: relative;
+    overflow: auto;
+  }
+
+  /* Upload zone */
+  #uploadZone {
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 60px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    max-width: 500px;
+  }
+  #uploadZone:hover, #uploadZone.dragover {
+    border-color: var(--accent);
+    background: rgba(99,102,241,0.05);
+  }
+  #uploadZone .icon { font-size: 48px; margin-bottom: 16px; }
+  #uploadZone .title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+  #uploadZone .sub { font-size: 13px; color: var(--text2); }
+
+  /* Box drawing overlay */
+  #boxOverlay {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none;
+    border: 2px dashed var(--accent);
+    background: rgba(99, 102, 241, 0.1);
+    display: none;
+  }
+
+  /* Text prompt */
+  .prompt-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    resize: none;
+  }
+  .prompt-input:focus { outline: none; border-color: var(--accent); }
+  .prompt-input::placeholder { color: var(--text2); }
+
+  /* Change image button */
+  .change-img-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    font-size: 11px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+  }
+  .change-img-btn:hover { background: rgba(0,0,0,0.8); border-color: var(--accent); }
+
+  /* Canvas area */
+  #canvasArea { display: none; flex-direction: column; align-items: center; }
+  #canvasWrap {
+    position: relative;
+    cursor: crosshair;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  #canvasWrap canvas { display: block; }
+  #maskCanvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+  #infoBar {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text2);
+    text-align: center;
+    min-height: 18px;
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <div class="sidebar-header">
+    <h1>SAM Browser Test</h1>
+    <span id="headerBadge" class="badge badge-wasm">WASM</span>
+  </div>
+
+  <!-- Model Selector -->
+  <div class="section">
+    <div class="section-title">Model</div>
+    <select id="modelSelect" class="model-select" onchange="onModelChange()">
+      <option value="sam1" selected>SAM 1 — ViT-B (Xenova/sam-vit-base)</option>
+      <option value="sam2">SAM 2 — Hiera-Tiny (sam2-hiera-tiny-ONNX)</option>
+      <option value="sam3">SAM 3 — Tracker (sam3-tracker-ONNX)</option>
+    </select>
+    <div id="modelDesc" class="model-desc">~93M params · ~375MB · ViT-B encoder · fp32</div>
+  </div>
+
+  <!-- Model Status -->
+  <div class="section">
+    <div class="section-title">Model Status</div>
+    <div class="status-row">
+      <div id="statusDot" class="status-dot"></div>
+      <span id="statusText" class="status-text">Not loaded</span>
+    </div>
+    <div id="statusSub" class="status-sub">Click "Load SAM Model" to begin</div>
+    <div id="progressWrap" class="progress-wrap">
+      <div id="progressBar" class="progress-bar"></div>
+    </div>
+    <div id="progressMsg" class="progress-msg"></div>
+    <button id="loadBtn" class="btn" style="margin-top:8px">Load SAM Model</button>
+  </div>
+
+  <!-- Model Info -->
+  <div class="section" id="modelInfoSection" style="display:none">
+    <div class="section-title">Model Info</div>
+    <div class="perf-row"><span class="perf-label">Name</span><span id="modelName" class="perf-value" style="font-size:11px">—</span></div>
+    <div class="perf-row"><span class="perf-label">Architecture</span><span id="modelArch" class="perf-value" style="font-size:11px">—</span></div>
+    <div class="perf-row"><span class="perf-label">Precision</span><span id="modelDtype" class="perf-value" style="font-size:11px">—</span></div>
+    <div class="perf-row"><span class="perf-label">Parameters</span><span id="modelParams" class="perf-value" style="font-size:11px">—</span></div>
+    <div class="perf-row"><span class="perf-label">Source</span><span id="modelSource" class="perf-value" style="font-size:11px">—</span></div>
+    <div class="perf-row"><span class="perf-label">Load Time</span><span id="modelLoadTime" class="perf-value perf-green" style="font-size:11px">—</span></div>
+  </div>
+
+  <!-- Backend Selector -->
+  <div class="section">
+    <div class="section-title">Backend</div>
+    <div class="btn-row">
+      <button id="btnWebGPU" class="btn" onclick="selectBackend('webgpu')">⚡ WebGPU</button>
+      <button id="btnWASM" class="btn" onclick="selectBackend('wasm')">🐌 WASM</button>
+    </div>
+    <div id="gpuName" class="gpu-name"></div>
+  </div>
+
+  <!-- Interaction Mode -->
+  <div class="section">
+    <div class="section-title">Interaction Mode</div>
+    <div class="btn-row" style="margin-bottom:6px">
+      <button id="btnPositive" class="btn active-green" onclick="setMode('positive')">✅ Positive</button>
+      <button id="btnNegative" class="btn" onclick="setMode('negative')">❌ Negative</button>
+    </div>
+    <div class="btn-row">
+      <button id="btnBox" class="btn" onclick="setMode('box')">▢ Box</button>
+      <button id="btnPrompt" class="btn" onclick="setMode('prompt')" style="display:none">💬 Prompt</button>
+    </div>
+  </div>
+
+  <!-- Text Prompt (SAM3 only) -->
+  <div class="section" id="promptSection" style="display:none">
+    <div class="section-title">Text Prompt (SAM3)</div>
+    <textarea id="promptInput" class="prompt-input" rows="2" placeholder="e.g. 'person in orange jumpsuit'"></textarea>
+  </div>
+
+  <!-- Click Points / Box -->
+  <div class="section">
+    <div class="section-title">Prompts (<span id="pointCount">0</span>)</div>
+    <div id="pointsList" class="points-list"></div>
+    <div class="btn-row">
+      <button class="btn btn-sm" onclick="undoPoint()">↩ Undo Last</button>
+      <button class="btn btn-sm" onclick="clearPoints()">🗑 Clear All</button>
+    </div>
+  </div>
+
+  <!-- Segment Action -->
+  <div class="section">
+    <button id="segmentBtn" class="btn btn-segment" onclick="onSegmentClick()" disabled>▶ Run Segment</button>
+    <div id="segmentHint" style="font-size:11px;color:var(--text2);margin-top:6px;text-align:center;">Load model & add points first</div>
+  </div>
+
+  <!-- Performance -->
+  <div class="section">
+    <div class="section-title">Performance</div>
+    <div class="perf-row"><span class="perf-label">Backend</span><span id="perfBackend" class="perf-value">—</span></div>
+    <div class="perf-row"><span class="perf-label">Encoder</span><span id="perfEncoder" class="perf-value">—</span></div>
+    <div class="perf-row"><span class="perf-label">Decoder</span><span id="perfDecoder" class="perf-value">—</span></div>
+    <div class="perf-row"><span class="perf-label">IoU Score</span><span id="perfIoU" class="perf-value">—</span></div>
+  </div>
+
+  <!-- Log -->
+  <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div class="section-title">Log</div>
+    <div id="logPanel" class="log-panel"></div>
+  </div>
+</div>
+
+<!-- MAIN AREA -->
+<div id="main">
+  <div id="uploadZone">
+    <div class="icon">📁</div>
+    <div class="title">Drop image here</div>
+    <div class="sub">or click to browse</div>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" style="display:none">
+
+  <div id="canvasArea">
+    <div id="canvasWrap">
+      <canvas id="imageCanvas"></canvas>
+      <canvas id="maskCanvas"></canvas>
+      <div id="boxOverlay"></div>
+      <button class="change-img-btn" onclick="changeImage()">Change Image</button>
+    </div>
+    <div id="infoBar"></div>
+  </div>
+</div>
+
+<script>
+// ===================== STATE =====================
+let worker = null;
+let modelLoaded = false;
+let isLoadingModel = false;
+let imageEncoded = false;
+let isEncoding = false;
+let isPredicting = false;
+let currentImageEl = null;
+let selectedBackend = 'webgpu';
+let currentMode = 'positive';
+let points = [];
+let encoderTimeMs = null;
+let requestCounter = 0;
+let pendingRequests = new Map();
+let gpuDeviceName = '';
+let canvasScale = 1;
+let selectedModel = 'sam1';
+let currentBox = null;       // { x1, y1, x2, y2 } for box mode
+let isDrawingBox = false;
+let boxStart = null;
+
+// ===================== MODEL REGISTRY =====================
+const MODEL_REGISTRY = {
+  sam1: {
+    id: 'Xenova/sam-vit-base',
+    name: 'SAM 1 ViT-B',
+    api: 'sam1',           // uses SamModel + get_image_embeddings
+    params: '~93M',
+    size: '~375MB',
+    arch: 'ViT-B encoder',
+    desc: '~93M params · ~375MB · ViT-B encoder · fp32',
+  },
+  sam2: {
+    id: 'onnx-community/sam2-hiera-tiny-ONNX',
+    name: 'SAM 2 Hiera-Tiny',
+    api: 'sam2',           // uses Sam2Model (tracker API)
+    params: '~39M',
+    size: '~134MB',
+    arch: 'Hiera-Tiny encoder',
+    desc: '~39M params · ~134MB · Hiera-Tiny encoder · fp32',
+  },
+  sam3: {
+    id: 'onnx-community/sam3-tracker-ONNX',
+    name: 'SAM 3 Tracker',
+    api: 'sam3',           // uses Sam3TrackerModel
+    params: '—',
+    size: '—',
+    arch: 'Tracker encoder',
+    desc: 'SAM3 concept-based · Tracker architecture · fp32',
+  },
+};
+
+// ===================== DOM REFS =====================
+const $ = id => document.getElementById(id);
+const statusDot = $('statusDot');
+const statusText = $('statusText');
+const statusSub = $('statusSub');
+const progressWrap = $('progressWrap');
+const progressBar = $('progressBar');
+const progressMsg = $('progressMsg');
+const loadBtn = $('loadBtn');
+const headerBadge = $('headerBadge');
+const gpuNameEl = $('gpuName');
+const pointsList = $('pointsList');
+const pointCount = $('pointCount');
+const perfBackend = $('perfBackend');
+const perfEncoder = $('perfEncoder');
+const perfDecoder = $('perfDecoder');
+const perfIoU = $('perfIoU');
+const logPanel = $('logPanel');
+const uploadZone = $('uploadZone');
+const fileInput = $('fileInput');
+const canvasArea = $('canvasArea');
+const canvasWrap = $('canvasWrap');
+const imageCanvas = $('imageCanvas');
+const maskCanvas = $('maskCanvas');
+const infoBar = $('infoBar');
+
+// ===================== LOGGING =====================
+function log(msg, type = 'info') {
+  const now = new Date();
+  const ts = [now.getHours(), now.getMinutes(), now.getSeconds()]
+    .map(n => String(n).padStart(2, '0')).join(':');
+  const cls = { info: 'log-info', ok: 'log-ok', warn: 'log-warn', err: 'log-err' }[type] || 'log-info';
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="${cls}">${msg}</span>`;
+  logPanel.appendChild(line);
+  logPanel.scrollTop = logPanel.scrollHeight;
+}
+
+// ===================== WEBGPU DETECTION =====================
+async function detectBackend() {
+  if ('gpu' in navigator) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        const info = adapter.info || {};
+        gpuDeviceName = info.device || info.description || info.vendor || 'Unknown GPU';
+        selectedBackend = 'webgpu';
+        gpuNameEl.textContent = gpuDeviceName;
+        log(`WebGPU available: ${gpuDeviceName}`, 'ok');
+      } else {
+        selectedBackend = 'wasm';
+        log('WebGPU adapter not found, falling back to WASM', 'warn');
+      }
+    } catch (e) {
+      selectedBackend = 'wasm';
+      log('WebGPU detection failed: ' + e.message, 'warn');
+    }
+  } else {
+    selectedBackend = 'wasm';
+    log('WebGPU not supported in this browser', 'warn');
+  }
+
+  if (navigator.deviceMemory) {
+    log(`Device memory: ${navigator.deviceMemory}GB`, 'info');
+    if (navigator.deviceMemory < 2) {
+      log('Low RAM detected — performance may be slow', 'warn');
+    }
+  }
+
+  updateBackendUI();
+}
+
+function updateBackendUI() {
+  const isGPU = selectedBackend === 'webgpu';
+  headerBadge.className = 'badge ' + (isGPU ? 'badge-webgpu' : 'badge-wasm');
+  headerBadge.textContent = isGPU ? 'WebGPU' : 'WASM';
+  $('btnWebGPU').className = 'btn' + (isGPU ? ' active-green' : '');
+  $('btnWASM').className = 'btn' + (!isGPU ? ' active-yellow' : '');
+  perfBackend.textContent = isGPU ? 'WebGPU' : 'WASM';
+  perfBackend.className = 'perf-value ' + (isGPU ? 'perf-green' : 'perf-yellow');
+}
+
+function selectBackend(b) {
+  if (isLoadingModel) return;
+  if (b === selectedBackend && !modelLoaded) return;
+  selectedBackend = b;
+  updateBackendUI();
+  if (modelLoaded) {
+    modelLoaded = false;
+    imageEncoded = false;
+    encoderTimeMs = null;
+    if (worker) { worker.terminate(); worker = null; }
+    setStatus('idle', 'Not loaded', 'Backend changed — reload model');
+    perfEncoder.textContent = '—'; perfEncoder.className = 'perf-value';
+    perfDecoder.textContent = '—'; perfDecoder.className = 'perf-value';
+    perfIoU.textContent = '—'; perfIoU.className = 'perf-value';
+    loadBtn.disabled = false;
+    $('modelSelect').disabled = false;
+    log(`Switched to ${b.toUpperCase()} — model needs reload`, 'warn');
+  }
+  updateInfoBar();
+}
+
+// ===================== MODEL SELECTOR =====================
+function onModelChange() {
+  const sel = $('modelSelect').value;
+  if (sel === selectedModel && modelLoaded) return;
+  selectedModel = sel;
+  const info = MODEL_REGISTRY[sel];
+  $('modelDesc').textContent = info.desc;
+
+  // Reset if model was loaded
+  if (modelLoaded || isLoadingModel) {
+    modelLoaded = false;
+    isLoadingModel = false;
+    imageEncoded = false;
+    encoderTimeMs = null;
+    if (worker) { worker.terminate(); worker = null; }
+    setStatus('idle', 'Not loaded', `Selected ${info.name} — click Load`);
+    perfEncoder.textContent = '—'; perfEncoder.className = 'perf-value';
+    perfDecoder.textContent = '—'; perfDecoder.className = 'perf-value';
+    perfIoU.textContent = '—'; perfIoU.className = 'perf-value';
+    $('modelInfoSection').style.display = 'none';
+    loadBtn.disabled = false;
+    progressWrap.style.display = 'none';
+    log(`Switched to ${info.name} — model needs reload`, 'warn');
+  }
+  updateInfoBar();
+  updateSegmentBtn();
+  updateModeButtons();
+}
+
+// ===================== STATUS =====================
+function setStatus(state, text, sub) {
+  statusDot.className = 'status-dot' + (state === 'loading' ? ' loading' : state === 'ready' ? ' ready' : state === 'error' ? ' error' : '');
+  statusText.textContent = text;
+  if (sub !== undefined) statusSub.textContent = sub;
+}
+
+// ===================== INTERACTION MODE =====================
+function setMode(m) {
+  currentMode = m;
+  $('btnPositive').className = 'btn' + (m === 'positive' ? ' active-green' : '');
+  $('btnNegative').className = 'btn' + (m === 'negative' ? ' active-red' : '');
+  $('btnBox').className = 'btn' + (m === 'box' ? ' active-accent' : '');
+  const promptBtn = $('btnPrompt');
+  if (promptBtn) promptBtn.className = 'btn' + (m === 'prompt' ? ' active-accent' : '');
+  $('promptSection').style.display = m === 'prompt' ? '' : 'none';
+  // Change cursor based on mode
+  if (canvasWrap) canvasWrap.style.cursor = m === 'box' ? 'crosshair' : 'crosshair';
+}
+
+function updateModeButtons() {
+  // Show/hide prompt button based on selected model
+  const promptBtn = $('btnPrompt');
+  if (promptBtn) {
+    promptBtn.style.display = selectedModel === 'sam3' ? '' : 'none';
+    if (currentMode === 'prompt' && selectedModel !== 'sam3') {
+      setMode('positive');
+    }
+  }
+}
+
+// ===================== WEB WORKER =====================
+function createWorker(modelKey) {
+  const modelCfg = MODEL_REGISTRY[modelKey];
+  const api = modelCfg.api; // 'sam1', 'sam2', or 'sam3'
+
+  // Build dynamic import based on model API
+  const importClass = api === 'sam1' ? 'SamModel' : 'Sam2Model';
+
+  const workerCode = `
+import { ${importClass}, AutoProcessor, RawImage, Tensor, env }
+  from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+
+env.allowLocalModels = false;
+env.allowRemoteModels = true;
+env.useBrowserCache = true;
+
+const API = '${api}';
+const MODEL_ID = '${modelCfg.id}';
+
+let model = null;
+let processor = null;
+let imageEmbeddings = null;
+let currentRawImage = null;
+let imageOriginalSizes = null;
+let imageReshapedSizes = null;
+
+function progressCallback(p) {
+  if (p.status === 'progress' && p.progress !== undefined) {
+    self.postMessage({
+      type: 'MODEL_PROGRESS',
+      progress: Math.round(p.progress),
+      message: p.file ? ('Downloading ' + p.file + '...') : 'Downloading...'
+    });
+  } else if (p.status === 'done') {
+    self.postMessage({ type: 'MODEL_PROGRESS', progress: 100, message: 'Download complete' });
+  } else if (p.status === 'initiate') {
+    self.postMessage({
+      type: 'MODEL_PROGRESS',
+      progress: 0,
+      message: p.file ? ('Starting ' + p.file + '...') : 'Starting...'
+    });
+  }
+}
+
+self.onmessage = async (e) => {
+  const msg = e.data;
+  try {
+    if (msg.type === 'LOAD_MODEL') {
+      const t0 = performance.now();
+      const device = msg.device || 'wasm';
+
+      self.postMessage({ type: 'MODEL_PROGRESS', progress: 0, message: 'Loading ' + MODEL_ID + '...' });
+
+      model = await ${importClass}.from_pretrained(MODEL_ID, {
+        dtype: 'fp32',
+        device: device,
+        progress_callback: progressCallback
+      });
+
+      processor = await AutoProcessor.from_pretrained(MODEL_ID);
+
+      const loadTime = Math.round(performance.now() - t0);
+
+      // Gather model config info
+      const config = model.config || {};
+      const visionConfig = config.vision_config || {};
+      const modelInfo = {
+        modelId: MODEL_ID,
+        api: API,
+        dtype: 'fp32',
+        device: device,
+        hiddenSize: visionConfig.hidden_size || config.hidden_size || '—',
+        numLayers: visionConfig.num_hidden_layers || config.num_hidden_layers || '—',
+        imageSize: visionConfig.image_size || config.image_size || '—',
+        patchSize: visionConfig.patch_size || '—',
+        configKeys: Object.keys(config).join(', '),
+      };
+      self.postMessage({ type: 'MODEL_LOADED', loadTime, modelInfo });
+
+    } else if (msg.type === 'SET_IMAGE') {
+      const t0 = performance.now();
+      const { width, height, imageData } = msg;
+      const rgba = new Uint8ClampedArray(imageData);
+      currentRawImage = new RawImage(rgba, width, height, 4);
+
+      if (API === 'sam1') {
+        // SAM1: explicit image embedding step
+        const inputs = await processor(currentRawImage);
+        imageEmbeddings = await model.get_image_embeddings(inputs);
+        // Save real image sizes for post_process_masks later
+        imageOriginalSizes = inputs.original_sizes;
+        imageReshapedSizes = inputs.reshaped_input_sizes;
+      }
+      // SAM2/SAM3: no separate embedding step — done at predict time
+
+      const encoderTime = Math.round(performance.now() - t0);
+      self.postMessage({ type: 'IMAGE_SET', encoderTime });
+
+    } else if (msg.type === 'PREDICT') {
+      const t0 = performance.now();
+      const { points, labels, box, requestId } = msg;
+
+      let maskData, maskW, maskH, score;
+
+      // Build processor options
+      const procOpts = {};
+      const hasPoints = points && points.length > 0;
+      const hasBox = box && box.length === 4;
+
+      if (hasPoints) {
+        if (API === 'sam1') {
+          // SAM1: input_points [batch, nb_points, 2], input_labels [batch, nb_points]
+          procOpts.input_points = [points.map(p => [p[0], p[1]])];
+          procOpts.input_labels = [labels];
+        } else {
+          // SAM2/3: input_points [point_batch_size, nb_points, 2] (3D, auto-expanded to 4D)
+          procOpts.input_points = [[points.map(p => [p[0], p[1]])]];
+          procOpts.input_labels = [[labels]];
+        }
+      }
+
+      if (hasBox) {
+        if (API === 'sam1') {
+          procOpts.input_boxes = [[box]];
+          // SAM1 requires input_points — add box center as positive point if none provided
+          if (!hasPoints) {
+            const cx = Math.round((box[0] + box[2]) / 2);
+            const cy = Math.round((box[1] + box[3]) / 2);
+            procOpts.input_points = [[[cx, cy]]];
+            procOpts.input_labels = [[1]];
+          }
+        } else {
+          // SAM2/3: input_boxes shape [batch, num_boxes, 4]
+          procOpts.input_boxes = [[[box[0], box[1], box[2], box[3]]]];
+          // SAM2/3 handles box-only natively — no need for dummy points
+        }
+      }
+
+      function extractMask(masks, outputs) {
+        // masks[0] is a tensor with dims [numMasks, H, W] (e.g. [3, 600, 900])
+        // Pick the mask with the highest IoU score
+        let maskContainer = masks[0];
+        // Unwrap if nested array
+        while (maskContainer && Array.isArray(maskContainer)) {
+          maskContainer = maskContainer[0];
+        }
+        if (!maskContainer || !maskContainer.dims) {
+          throw new Error('Could not extract mask tensor from output');
+        }
+
+        const dims = maskContainer.dims;
+        const scores = outputs.iou_scores ? Array.from(outputs.iou_scores.data) : [0];
+
+        if (dims.length === 3) {
+          // Multiple masks: [numMasks, H, W] — pick best by IoU
+          const numMasks = dims[0];
+          const h = dims[1];
+          const w = dims[2];
+          const maskSize = h * w;
+
+          let bestIdx = 0;
+          for (let i = 1; i < Math.min(numMasks, scores.length); i++) {
+            if (scores[i] > scores[bestIdx]) bestIdx = i;
+          }
+
+          const offset = bestIdx * maskSize;
+          const md = Array.from(maskContainer.data.slice(offset, offset + maskSize));
+          self.postMessage({ type: 'DEBUG', message: 'Picked mask #' + bestIdx + '/' + numMasks + ' (scores: ' + scores.map(s => s.toFixed(4)).join(', ') + ')' });
+          return { maskData: md, maskW: w, maskH: h, score: scores[bestIdx] };
+        } else {
+          // Single mask: [H, W]
+          const w = dims[dims.length - 1];
+          const h = dims[dims.length - 2];
+          const md = Array.from(maskContainer.data);
+          return { maskData: md, maskW: w, maskH: h, score: scores[0] };
+        }
+      }
+
+      if (API === 'sam1') {
+        const inputs = await processor(currentRawImage, procOpts);
+        self.postMessage({ type: 'DEBUG', message: 'SAM1 inputs keys: ' + Object.keys(inputs).join(', ') });
+        const outputs = await model({ ...inputs, ...imageEmbeddings });
+        self.postMessage({ type: 'DEBUG', message: 'SAM1 outputs keys: ' + Object.keys(outputs).join(', ') + ', pred_masks dims: ' + JSON.stringify(outputs.pred_masks?.dims) + ', iou dims: ' + JSON.stringify(outputs.iou_scores?.dims) });
+        const masks = await processor.post_process_masks(
+          outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
+        );
+        self.postMessage({ type: 'DEBUG', message: 'masks type: ' + typeof masks + ', isArray: ' + Array.isArray(masks) + ', length: ' + (masks?.length) + ', [0] type: ' + typeof masks?.[0] + ', [0] length: ' + masks?.[0]?.length + ', [0][0] type: ' + typeof masks?.[0]?.[0] + ', [0][0] dims: ' + JSON.stringify(masks?.[0]?.[0]?.dims) });
+        const result = extractMask(masks, outputs);
+        maskData = result.maskData; maskW = result.maskW; maskH = result.maskH; score = result.score;
+      } else {
+        const inputs = await processor(currentRawImage, procOpts);
+        const outputs = await model(inputs);
+        const masks = await processor.post_process_masks(
+          outputs.pred_masks, inputs.original_sizes, inputs.reshaped_input_sizes
+        );
+        const result = extractMask(masks, outputs);
+        maskData = result.maskData; maskW = result.maskW; maskH = result.maskH; score = result.score;
+      }
+
+      const decoderTime = Math.round(performance.now() - t0);
+
+      // Debug
+      const truthyCount = maskData.filter(v => v).length;
+      const sampleVals = maskData.slice(0, 5).map(v => typeof v + ':' + v).join(', ');
+      self.postMessage({
+        type: 'DEBUG',
+        message: API.toUpperCase() + ' mask: ' + maskW + 'x' + maskH + ', truthy: ' + truthyCount + '/' + maskData.length + ', sample: [' + sampleVals + ']'
+      });
+
+      self.postMessage({
+        type: 'MASK_RESULT',
+        maskData, width: maskW, height: maskH,
+        score, decoderTime, requestId
+      });
+    }
+  } catch (err) {
+    self.postMessage({ type: 'ERROR', message: err.message || String(err), requestId: msg.requestId });
+  }
+};
+`;
+
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  worker = new Worker(URL.createObjectURL(blob), { type: 'module' });
+
+  worker.onmessage = (e) => {
+    const msg = e.data;
+    switch (msg.type) {
+      case 'MODEL_PROGRESS':
+        progressWrap.style.display = 'block';
+        progressBar.style.width = msg.progress + '%';
+        progressMsg.textContent = msg.message || '';
+        setStatus('loading', `Loading... ${msg.progress}%`, msg.message);
+        break;
+
+      case 'MODEL_LOADED':
+        isLoadingModel = false;
+        modelLoaded = true;
+        progressWrap.style.display = 'none';
+        progressMsg.textContent = '';
+        setStatus('ready', 'Model ready', `Loaded in ${(msg.loadTime / 1000).toFixed(1)}s`);
+        loadBtn.disabled = true;
+        $('modelSelect').disabled = false;
+        log(`Model loaded in ${(msg.loadTime / 1000).toFixed(1)}s`, 'ok');
+
+        // Populate model info panel
+        if (msg.modelInfo) {
+          const mi = msg.modelInfo;
+          const regInfo = MODEL_REGISTRY[selectedModel] || {};
+          $('modelInfoSection').style.display = '';
+          $('modelName').textContent = mi.modelId;
+          $('modelArch').textContent = `${mi.numLayers} layers, hidden ${mi.hiddenSize}, patch ${mi.patchSize}, img ${mi.imageSize}`;
+          $('modelDtype').textContent = mi.dtype.toUpperCase();
+          $('modelParams').textContent = regInfo.params || '—';
+          $('modelSource').textContent = 'HuggingFace Transformers.js';
+          $('modelLoadTime').textContent = (msg.loadTime / 1000).toFixed(1) + 's';
+          log(`Model: ${mi.modelId} | API: ${mi.api} | ${mi.numLayers}L h${mi.hiddenSize} p${mi.patchSize} img${mi.imageSize} | ${mi.dtype} on ${mi.device}`, 'ok');
+        }
+
+        updateInfoBar();
+        updateSegmentBtn();
+        if (currentImageEl && !imageEncoded && !isEncoding) {
+          encodeImage();
+        }
+        break;
+
+      case 'IMAGE_SET':
+        isEncoding = false;
+        imageEncoded = true;
+        encoderTimeMs = msg.encoderTime;
+        perfEncoder.textContent = msg.encoderTime + 'ms';
+        perfEncoder.className = 'perf-value ' + timeColor(msg.encoderTime, 3000, 8000);
+        log(`Image encoded in ${msg.encoderTime}ms`, 'ok');
+        updateInfoBar();
+        updateSegmentBtn();
+        break;
+
+      case 'MASK_RESULT':
+        isPredicting = false;
+        renderMask(msg.maskData, msg.width, msg.height);
+        drawPoints();
+        perfDecoder.textContent = msg.decoderTime + 'ms';
+        perfDecoder.className = 'perf-value ' + timeColor(msg.decoderTime, 100, 500);
+        perfIoU.textContent = msg.score.toFixed(4);
+        perfIoU.className = 'perf-value ' + (msg.score > 0.9 ? 'perf-green' : msg.score > 0.7 ? 'perf-yellow' : 'perf-red');
+        log(`Mask: score=${msg.score.toFixed(4)} decoder=${msg.decoderTime}ms`, 'ok');
+        updateInfoBar();
+        updateSegmentBtn();
+        if (msg.requestId) pendingRequests.delete(msg.requestId);
+        break;
+
+      case 'DEBUG':
+        log(msg.message, 'info');
+        break;
+
+      case 'ERROR':
+        isLoadingModel = false;
+        isEncoding = false;
+        isPredicting = false;
+        setStatus('error', 'Error', msg.message);
+        log('Error: ' + msg.message, 'err');
+        $('modelSelect').disabled = false;
+        loadBtn.disabled = modelLoaded;
+        updateSegmentBtn();
+        if (msg.requestId) pendingRequests.delete(msg.requestId);
+        break;
+    }
+  };
+
+  worker.onerror = (e) => {
+    log('Worker error: ' + e.message, 'err');
+  };
+}
+
+function timeColor(ms, greenThresh, redThresh) {
+  if (ms < greenThresh) return 'perf-green';
+  if (ms > redThresh) return 'perf-red';
+  return 'perf-yellow';
+}
+
+// ===================== MODEL LOADING =====================
+loadBtn.onclick = () => {
+  if (isLoadingModel || modelLoaded) return;
+  isLoadingModel = true;
+  loadBtn.disabled = true;
+  $('modelSelect').disabled = true;
+  const modelCfg = MODEL_REGISTRY[selectedModel];
+  setStatus('loading', 'Loading...', 'Initializing worker...');
+  progressWrap.style.display = 'block';
+  progressBar.style.width = '0%';
+  log(`Loading ${modelCfg.name} (${modelCfg.id}) with ${selectedBackend.toUpperCase()} backend...`, 'info');
+
+  if (worker) worker.terminate();
+  createWorker(selectedModel);
+  worker.postMessage({ type: 'LOAD_MODEL', device: selectedBackend });
+};
+
+// ===================== IMAGE HANDLING =====================
+function handleFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      currentImageEl = img;
+      imageEncoded = false;
+      points = [];
+      currentBox = null;
+      updatePointsUI();
+
+      const MAX = 900;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        const ratio = Math.min(MAX / w, MAX / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+
+      imageCanvas.width = w;
+      imageCanvas.height = h;
+      maskCanvas.width = w;
+      maskCanvas.height = h;
+
+      const ctx = imageCanvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const mctx = maskCanvas.getContext('2d');
+      mctx.clearRect(0, 0, w, h);
+
+      uploadZone.style.display = 'none';
+      canvasArea.style.display = 'flex';
+
+      perfEncoder.textContent = '—'; perfEncoder.className = 'perf-value';
+      perfDecoder.textContent = '—'; perfDecoder.className = 'perf-value';
+      perfIoU.textContent = '—'; perfIoU.className = 'perf-value';
+      encoderTimeMs = null;
+
+      log(`Image loaded: ${w}x${h}`, 'ok');
+      updateInfoBar();
+
+      if (modelLoaded) {
+        encodeImage();
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function encodeImage() {
+  if (!worker || !currentImageEl || isEncoding) return;
+  isEncoding = true;
+  const w = imageCanvas.width, h = imageCanvas.height;
+  const ctx = imageCanvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const modelCfg = MODEL_REGISTRY[selectedModel];
+  if (modelCfg.api === 'sam1') {
+    log('Encoding image (SAM1 pre-embedding)...', 'info');
+  } else {
+    log('Sending image to worker (SAM2/3 — encoding at predict time)...', 'info');
+  }
+  updateInfoBar();
+  worker.postMessage({
+    type: 'SET_IMAGE',
+    imageData: imageData.data.buffer,
+    width: w,
+    height: h
+  }, [imageData.data.buffer]);
+  // Redraw image since we transferred the buffer
+  const rctx = imageCanvas.getContext('2d');
+  rctx.drawImage(currentImageEl, 0, 0, w, h);
+}
+
+// ===================== CLICK / BOX HANDLING =====================
+function getCanvasCoords(e) {
+  const rect = canvasWrap.getBoundingClientRect();
+  const scaleX = imageCanvas.width / rect.width;
+  const scaleY = imageCanvas.height / rect.height;
+  return {
+    x: Math.round((e.clientX - rect.left) * scaleX),
+    y: Math.round((e.clientY - rect.top) * scaleY),
+    clientX: e.clientX - rect.left,
+    clientY: e.clientY - rect.top,
+    rect
+  };
+}
+
+canvasWrap.addEventListener('mousedown', (e) => {
+  if (!currentImageEl || currentMode === 'prompt') return;
+  if (currentMode === 'box') {
+    isDrawingBox = true;
+    const c = getCanvasCoords(e);
+    boxStart = { x: c.x, y: c.y, clientX: c.clientX, clientY: c.clientY };
+    const overlay = $('boxOverlay');
+    overlay.style.display = 'block';
+    overlay.style.left = c.clientX + 'px';
+    overlay.style.top = c.clientY + 'px';
+    overlay.style.width = '0px';
+    overlay.style.height = '0px';
+    e.preventDefault();
+  }
+});
+
+canvasWrap.addEventListener('mousemove', (e) => {
+  if (!isDrawingBox || !boxStart) return;
+  const rect = canvasWrap.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const overlay = $('boxOverlay');
+  overlay.style.left = Math.min(cx, boxStart.clientX) + 'px';
+  overlay.style.top = Math.min(cy, boxStart.clientY) + 'px';
+  overlay.style.width = Math.abs(cx - boxStart.clientX) + 'px';
+  overlay.style.height = Math.abs(cy - boxStart.clientY) + 'px';
+});
+
+canvasWrap.addEventListener('mouseup', (e) => {
+  if (!isDrawingBox || !boxStart) return;
+  isDrawingBox = false;
+  const c = getCanvasCoords(e);
+  $('boxOverlay').style.display = 'none';
+
+  const x1 = Math.min(boxStart.x, c.x);
+  const y1 = Math.min(boxStart.y, c.y);
+  const x2 = Math.max(boxStart.x, c.x);
+  const y2 = Math.max(boxStart.y, c.y);
+
+  if (Math.abs(x2 - x1) < 5 || Math.abs(y2 - y1) < 5) {
+    boxStart = null;
+    return; // Too small, ignore
+  }
+
+  currentBox = { x1, y1, x2, y2 };
+  points = []; // Box replaces points
+  updatePointsUI();
+  log(`Box drawn: (${x1},${y1}) to (${x2},${y2})`, 'info');
+  drawBoxAndPoints();
+  updateSegmentBtn();
+  updateInfoBar();
+  boxStart = null;
+});
+
+canvasWrap.addEventListener('click', (e) => {
+  if (!currentImageEl || currentMode === 'box' || currentMode === 'prompt') return;
+  const c = getCanvasCoords(e);
+  const label = currentMode === 'positive' ? 1 : 0;
+
+  currentBox = null; // Point click clears box
+  points.push({ x: c.x, y: c.y, label });
+  updatePointsUI();
+  log(`Point added: (${c.x}, ${c.y}) ${label === 1 ? 'positive' : 'negative'}`, 'info');
+
+  drawBoxAndPoints();
+  updateSegmentBtn();
+  updateInfoBar();
+});
+
+// ===================== SEGMENT BUTTON =====================
+function updateSegmentBtn() {
+  const btn = $('segmentBtn');
+  const hint = $('segmentHint');
+  if (!modelLoaded) {
+    btn.disabled = true;
+    hint.textContent = 'Load model first';
+  } else if (!imageEncoded && !isEncoding) {
+    btn.disabled = true;
+    hint.textContent = 'Upload an image first';
+  } else if (isEncoding) {
+    btn.disabled = true;
+    hint.textContent = 'Encoding image... please wait';
+  } else if (points.length === 0 && !currentBox && currentMode !== 'prompt') {
+    btn.disabled = true;
+    hint.textContent = 'Click on image to add points or draw a box';
+  } else if (currentMode === 'prompt' && !($('promptInput') && $('promptInput').value.trim())) {
+    btn.disabled = true;
+    hint.textContent = 'Enter a text prompt above';
+  } else if (isPredicting) {
+    btn.disabled = true;
+    btn.className = 'btn btn-segment running';
+    btn.textContent = '⏳ Segmenting...';
+    hint.textContent = '';
+  } else {
+    btn.disabled = false;
+    btn.className = 'btn btn-segment';
+    btn.textContent = '▶ Run Segment';
+    const parts = [];
+    if (currentBox) parts.push('1 box');
+    if (points.length > 0) parts.push(points.length + ' point(s)');
+    hint.textContent = parts.join(' + ') + ' ready';
+  }
+}
+
+function onSegmentClick() {
+  if (!modelLoaded || !imageEncoded || isPredicting) return;
+  const hasPoints = points.length > 0;
+  const hasBox = !!currentBox;
+  const hasPrompt = currentMode === 'prompt' && $('promptInput') && $('promptInput').value.trim();
+  if (!hasPoints && !hasBox && !hasPrompt) return;
+
+  if (hasBox && hasPoints) {
+    log(`Running segmentation with box + ${points.length} point(s)...`, 'info');
+  } else if (hasBox) {
+    log(`Running segmentation with box (${currentBox.x1},${currentBox.y1})→(${currentBox.x2},${currentBox.y2})...`, 'info');
+  } else if (hasPrompt) {
+    log(`Running segmentation with prompt: "${$('promptInput').value.trim()}"...`, 'info');
+  } else {
+    log(`Running segmentation with ${points.length} point(s)...`, 'info');
+  }
+  runPredict();
+  updateSegmentBtn();
+}
+
+function runPredict() {
+  if (isPredicting || !worker) return;
+
+  const hasPoints = points.length > 0;
+  const hasBox = !!currentBox;
+  if (!hasPoints && !hasBox) return;
+
+  isPredicting = true;
+  const reqId = 'req_' + (++requestCounter) + '_' + Date.now();
+  const msg = { type: 'PREDICT', requestId: reqId };
+
+  if (hasPoints) {
+    msg.points = points.map(p => [p.x, p.y]);
+    msg.labels = points.map(p => p.label);
+  }
+  if (hasBox) {
+    msg.box = [currentBox.x1, currentBox.y1, currentBox.x2, currentBox.y2];
+  }
+
+  worker.postMessage(msg);
+  pendingRequests.set(reqId, true);
+}
+
+// ===================== MASK RENDERING =====================
+function renderMask(maskData, maskW, maskH) {
+  const cw = maskCanvas.width, ch = maskCanvas.height;
+  const ctx = maskCanvas.getContext('2d');
+  ctx.clearRect(0, 0, cw, ch);
+
+  // Debug: check mask data stats
+  let trueCount = 0;
+  for (let i = 0; i < maskData.length; i++) {
+    if (maskData[i]) trueCount++;
+  }
+  log(`Mask render: ${maskW}x${maskH} → canvas ${cw}x${ch}, truthy pixels: ${trueCount}/${maskData.length}`, 'info');
+
+  if (trueCount === 0) {
+    log('Warning: mask is empty — no pixels to render', 'warn');
+    return;
+  }
+
+  const imgData = ctx.createImageData(cw, ch);
+  const data = imgData.data;
+
+  // maskData is from the model at maskW x maskH, canvas is cw x ch
+  // Values can be boolean (true/false) or numeric — use truthy check
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const mx = Math.min(Math.round(x * maskW / cw), maskW - 1);
+      const my = Math.min(Math.round(y * maskH / ch), maskH - 1);
+      const mi = my * maskW + mx;
+      const ci = (y * cw + x) * 4;
+      if (maskData[mi]) {
+        data[ci] = 99;
+        data[ci + 1] = 102;
+        data[ci + 2] = 241;
+        data[ci + 3] = 140;
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Edge detection outline
+  ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  for (let y = 1; y < ch - 1; y++) {
+    for (let x = 1; x < cw - 1; x++) {
+      const ci = (y * cw + x) * 4;
+      if (data[ci + 3] > 0) {
+        const top = data[((y - 1) * cw + x) * 4 + 3] === 0;
+        const bot = data[((y + 1) * cw + x) * 4 + 3] === 0;
+        const lft = data[(y * cw + (x - 1)) * 4 + 3] === 0;
+        const rgt = data[(y * cw + (x + 1)) * 4 + 3] === 0;
+        if (top || bot || lft || rgt) {
+          ctx.rect(x, y, 1, 1);
+        }
+      }
+    }
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawBoxAndPoints() {
+  const ctx = maskCanvas.getContext('2d');
+  // Draw box if exists
+  if (currentBox) {
+    const b = currentBox;
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(99, 102, 241, 0.08)';
+    ctx.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+  }
+  // Draw points
+  for (const pt of points) {
+    const isPos = pt.label === 1;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = isPos ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(isPos ? '+' : '−', pt.x, pt.y);
+  }
+}
+
+// Keep old name as alias
+function drawPoints() { drawBoxAndPoints(); }
+
+// ===================== CHANGE IMAGE =====================
+function changeImage() {
+  fileInput.click();
+}
+
+// ===================== POINTS UI =====================
+function updatePointsUI() {
+  const total = points.length + (currentBox ? 1 : 0);
+  pointCount.textContent = total;
+  pointsList.innerHTML = '';
+  // Show box if present
+  if (currentBox) {
+    const div = document.createElement('div');
+    div.className = 'point-item';
+    div.innerHTML = `<div class="point-dot" style="background:var(--accent)"></div>
+      Box: (${currentBox.x1},${currentBox.y1}) → (${currentBox.x2},${currentBox.y2})`;
+    pointsList.appendChild(div);
+  }
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i];
+    const div = document.createElement('div');
+    div.className = 'point-item';
+    div.innerHTML = `<div class="point-dot" style="background:${pt.label === 1 ? 'var(--green)' : 'var(--red)'}"></div>
+      #${i + 1} (${pt.x}, ${pt.y}) ${pt.label === 1 ? 'positive' : 'negative'}`;
+    pointsList.appendChild(div);
+  }
+  pointsList.scrollTop = pointsList.scrollHeight;
+}
+
+function undoPoint() {
+  if (points.length === 0) return;
+  points.pop();
+  updatePointsUI();
+  log('Undid last point', 'info');
+  const ctx = maskCanvas.getContext('2d');
+  ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  drawPoints();
+  updateInfoBar();
+  updateSegmentBtn();
+}
+
+function clearPoints() {
+  if (points.length === 0 && !currentBox) return;
+  points = [];
+  currentBox = null;
+  updatePointsUI();
+  const ctx = maskCanvas.getContext('2d');
+  ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  perfDecoder.textContent = '—'; perfDecoder.className = 'perf-value';
+  perfIoU.textContent = '—'; perfIoU.className = 'perf-value';
+  log('Cleared all points', 'info');
+  updateInfoBar();
+  updateSegmentBtn();
+}
+
+// ===================== INFO BAR =====================
+function updateInfoBar() {
+  if (!currentImageEl) { infoBar.textContent = ''; return; }
+  if (!modelLoaded && !isLoadingModel) {
+    infoBar.textContent = 'Load the SAM model first, then click to segment';
+  } else if (isLoadingModel) {
+    infoBar.textContent = 'Model loading... please wait';
+  } else if (isEncoding) {
+    infoBar.textContent = 'Encoding image...';
+  } else if (modelLoaded && imageEncoded && points.length === 0) {
+    infoBar.textContent = 'Click on objects to segment | ✅ Positive to include | ❌ Negative to exclude';
+  } else if (modelLoaded && imageEncoded && points.length > 0) {
+    infoBar.textContent = `${points.length} point(s) — click to refine | Encoder: ${encoderTimeMs}ms`;
+  } else {
+    infoBar.textContent = '';
+  }
+}
+
+// ===================== FILE UPLOAD =====================
+uploadZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+uploadZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => {
+  uploadZone.classList.remove('dragover');
+});
+uploadZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+// Also allow drop on main area when canvas is showing
+$('main').addEventListener('dragover', (e) => e.preventDefault());
+$('main').addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+// ===================== INIT =====================
+(async () => {
+  log('SAM Browser Test initialized', 'ok');
+  await detectBackend();
+  updateInfoBar();
+  updateModeButtons();
+
+  // Prompt input updates segment button state
+  const promptInput = $('promptInput');
+  if (promptInput) {
+    promptInput.addEventListener('input', () => updateSegmentBtn());
+  }
+})();
+</script>
+</body>
+</html>
