@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SAM Browser Test — SAM1 / SAM2 / SAM3</title>
+<title>SAM + YOLO26 Browser Test</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -58,6 +58,15 @@
   }
   .badge-webgpu { background: rgba(34,197,94,0.15); color: var(--green); }
   .badge-wasm { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+  .tab-btn {
+    padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--text2); font-size: 11px;
+    cursor: pointer; font-weight: 600; transition: all 0.15s;
+  }
+  .tab-btn.tab-active {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
 
   .section {
     padding: 12px 16px;
@@ -322,6 +331,10 @@
   <div class="sidebar-header">
     <h1>SAM Browser Test</h1>
     <span id="headerBadge" class="badge badge-wasm">WASM</span>
+    <div style="margin-left:auto;display:flex;gap:4px">
+      <button id="tabSam" class="tab-btn tab-active" onclick="switchTab('sam')">SAM</button>
+      <button id="tabYolo" class="tab-btn" onclick="switchTab('yolo')">YOLO26</button>
+    </div>
   </div>
 
   <!-- Model Selector -->
@@ -421,6 +434,68 @@
     <div class="section-title">Log</div>
     <div id="logPanel" class="log-panel"></div>
   </div>
+
+  <!-- ==================== YOLO26 PANEL ==================== -->
+  <div id="yoloPanel" style="display:none;flex-direction:column;flex:1">
+    <div class="section">
+      <div class="section-title">YOLO26 Model</div>
+      <select id="yoloModelSelect" class="model-select" onchange="onYoloModelChange()">
+        <option value="yolo26n-det">Detect — YOLO26n (~10MB, fastest)</option>
+        <option value="yolo26s-det">Detect — YOLO26s (~38MB, better accuracy)</option>
+        <option value="yolo26n-pose">Pose — YOLO26n (~12MB, 17 keypoints)</option>
+        <option value="yolo26s-pose">Pose — YOLO26s (~40MB)</option>
+        <option value="yolo26n-seg">Segment — YOLO26n (~11MB)</option>
+        <option value="yolo26s-seg">Segment — YOLO26s (~40MB)</option>
+      </select>
+      <div id="yoloModelDesc" class="model-desc">NMS-free end-to-end · 80 COCO classes · opset 12</div>
+    </div>
+    <div class="section">
+      <div class="section-title">Status</div>
+      <div class="status-row">
+        <div id="yoloStatusDot" class="status-dot"></div>
+        <span id="yoloStatusText" class="status-text">Not loaded</span>
+      </div>
+      <div id="yoloStatusSub" class="status-sub">Click "Load YOLO26" to begin</div>
+      <div id="yoloProgressWrap" class="progress-wrap">
+        <div id="yoloProgressBar" class="progress-bar"></div>
+      </div>
+      <div id="yoloProgressMsg" class="progress-msg"></div>
+      <button id="yoloLoadBtn" class="btn" style="margin-top:8px" onclick="loadYoloModel()">Load YOLO26</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Confidence Threshold: <span id="yoloConfLabel">0.45</span></div>
+      <input type="range" id="yoloConfSlider" min="0.10" max="0.90" step="0.05" value="0.45"
+        oninput="yoloConf=+this.value;$('yoloConfLabel').textContent=this.value.slice(0,4)"
+        style="width:100%;accent-color:var(--accent);margin-top:4px">
+    </div>
+    <div class="section" id="yoloSegStyleSection" style="display:none">
+      <div class="section-title">Segmentation Output</div>
+      <select id="yoloSegStyle" class="model-select" onchange="yoloSegStyleVal=this.value">
+        <option value="filled-box">Filled mask + Box + Label</option>
+        <option value="filled-only">Filled mask only (no box)</option>
+        <option value="outline-only">Outline only (contour, no fill)</option>
+        <option value="box-only">Bounding box + Label only</option>
+      </select>
+    </div>
+    <div class="section">
+      <button id="yoloRunBtn" class="btn btn-segment" onclick="runYolo()" disabled>▶ Run YOLO26</button>
+      <button class="btn btn-sm" style="margin-top:6px;width:100%" onclick="clearYoloCanvas()">Clear Results</button>
+      <div id="yoloRunHint" style="font-size:11px;color:var(--text2);margin-top:6px;text-align:center">Load model & upload image first</div>
+    </div>
+    <div class="section">
+      <div class="section-title">Results</div>
+      <div class="perf-row"><span class="perf-label">Backend</span><span id="yoloPerfBackend" class="perf-value">—</span></div>
+      <div class="perf-row"><span class="perf-label">Preprocess</span><span id="yoloPerfPre" class="perf-value">—</span></div>
+      <div class="perf-row"><span class="perf-label">Inference</span><span id="yoloPerfInf" class="perf-value">—</span></div>
+      <div class="perf-row"><span class="perf-label">Render</span><span id="yoloPerfRender" class="perf-value">—</span></div>
+      <div class="perf-row"><span class="perf-label">Detections</span><span id="yoloPerfCount" class="perf-value">—</span></div>
+    </div>
+    <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="section-title">Log</div>
+      <div id="yoloLogPanel" class="log-panel"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- MAIN AREA -->
@@ -436,6 +511,7 @@
     <div id="canvasWrap">
       <canvas id="imageCanvas"></canvas>
       <canvas id="maskCanvas"></canvas>
+      <canvas id="yoloCanvas" style="position:absolute;top:0;left:0;pointer-events:none"></canvas>
       <div id="boxOverlay"></div>
       <button class="change-img-btn" onclick="changeImage()">Change Image</button>
     </div>
@@ -1072,6 +1148,8 @@ function handleFile(file) {
       imageCanvas.height = h;
       maskCanvas.width = w;
       maskCanvas.height = h;
+      const yc = $('yoloCanvas');
+      if (yc) { yc.width = w; yc.height = h; }
 
       const ctx = imageCanvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
@@ -1089,6 +1167,7 @@ function handleFile(file) {
 
       log(`Image loaded: ${w}x${h}`, 'ok');
       updateInfoBar();
+      updateYoloRunBtn();
 
       if (modelLoaded) {
         encodeImage();
@@ -1485,6 +1564,387 @@ $('main').addEventListener('drop', (e) => {
   e.preventDefault();
   if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
 });
+
+// ==================== YOLO26 STATE ====================
+let yoloWorker = null;
+let yoloModelLoaded = false;
+let yoloIsLoading = false;
+let yoloIsRunning = false;
+let yoloConf = 0.45;
+let yoloSegStyleVal = 'filled-box';
+let yoloSelectedModel = 'yolo26n-det';
+let currentTab = 'sam';
+
+const YOLO26_REGISTRY = {
+  'yolo26n-det': { url:'https://huggingface.co/onnx-community/yolo26n-ONNX/resolve/main/onnx/model.onnx', task:'detect', name:'YOLO26n Detect', size:'~10MB', params:'2.4M', desc:'NMS-free · 80 classes · 2.4M params · ~10MB' },
+  'yolo26s-det': { url:'https://huggingface.co/onnx-community/yolo26s-ONNX/resolve/main/onnx/model.onnx', task:'detect', name:'YOLO26s Detect', size:'~38MB', params:'9.5M', desc:'NMS-free · 80 classes · 9.5M params · ~38MB' },
+  'yolo26n-pose': { url:'https://huggingface.co/onnx-community/yolo26n-pose-ONNX/resolve/main/onnx/model.onnx', task:'pose', name:'YOLO26n Pose', size:'~12MB', params:'2.9M', desc:'NMS-free · 17 COCO keypoints · 2.9M params · ~12MB' },
+  'yolo26s-pose': { url:'https://huggingface.co/onnx-community/yolo26s-pose-ONNX/resolve/main/onnx/model.onnx', task:'pose', name:'YOLO26s Pose', size:'~40MB', params:'10.4M', desc:'NMS-free · 17 COCO keypoints · 10.4M params · ~40MB' },
+  'yolo26n-seg': { url:'https://huggingface.co/zwh20081/yolo26-onnx/resolve/main/yolo26n-seg.onnx', task:'seg', name:'YOLO26n Seg', size:'~11MB', params:'2.7M', desc:'NMS-free · instance seg · 2.7M params · ~11MB' },
+  'yolo26s-seg': { url:'https://huggingface.co/zwh20081/yolo26-onnx/resolve/main/yolo26s-seg.onnx', task:'seg', name:'YOLO26s Seg', size:'~40MB', params:'10.4M', desc:'NMS-free · instance seg · 10.4M params · ~40MB' },
+};
+
+const COCO_CLASSES = ['person','bicycle','car','motorcycle','airplane','bus','train','truck','boat','traffic light','fire hydrant','stop sign','parking meter','bench','bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe','backpack','umbrella','handbag','tie','suitcase','frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket','bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake','chair','couch','potted plant','bed','dining table','toilet','tv','laptop','mouse','remote','keyboard','cell phone','microwave','oven','toaster','sink','refrigerator','book','clock','vase','scissors','teddy bear','hair drier','toothbrush'];
+
+function classColor(classId, alpha = 1) {
+  const hue = (classId * 37) % 360;
+  return alpha < 1 ? `hsla(${hue},80%,55%,${alpha})` : `hsl(${hue},80%,55%)`;
+}
+
+const POSE_SKELETON = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+const KPT_COLORS = ['#ff6b6b','#ff6b6b','#ff6b6b','#ff6b6b','#ff6b6b','#4ecdc4','#4ecdc4','#45b7d1','#45b7d1','#45b7d1','#45b7d1','#96ceb4','#96ceb4','#ffeaa7','#ffeaa7','#ffeaa7','#ffeaa7'];
+
+// ==================== YOLO26 TAB / UI ====================
+function switchTab(tab) {
+  currentTab = tab;
+  $('yoloPanel').style.display = tab === 'yolo' ? 'flex' : 'none';
+  document.querySelectorAll('#sidebar > .section').forEach(s => {
+    s.style.display = tab === 'sam' ? '' : 'none';
+  });
+  // Also hide/show model info section
+  const mi = $('modelInfoSection');
+  if (mi) mi.style.display = (tab === 'sam' && mi.dataset.wasVisible === '1') ? '' : 'none';
+  $('tabSam').className = 'tab-btn' + (tab === 'sam' ? ' tab-active' : '');
+  $('tabYolo').className = 'tab-btn' + (tab === 'yolo' ? ' tab-active' : '');
+}
+
+function onYoloModelChange() {
+  yoloSelectedModel = $('yoloModelSelect').value;
+  const info = YOLO26_REGISTRY[yoloSelectedModel];
+  $('yoloModelDesc').textContent = info.desc;
+  $('yoloSegStyleSection').style.display = info.task === 'seg' ? '' : 'none';
+  if (yoloModelLoaded || yoloIsLoading) {
+    yoloModelLoaded = false; yoloIsLoading = false;
+    if (yoloWorker) { yoloWorker.terminate(); yoloWorker = null; }
+    setYoloStatus('idle', 'Not loaded', 'Selected ' + info.name + ' — click Load');
+    $('yoloLoadBtn').disabled = false;
+  }
+  updateYoloRunBtn();
+}
+
+function setYoloStatus(state, text, sub) {
+  $('yoloStatusDot').className = 'status-dot' + (state === 'loading' ? ' loading' : state === 'ready' ? ' ready' : state === 'error' ? ' error' : '');
+  $('yoloStatusText').textContent = text;
+  if (sub !== undefined) $('yoloStatusSub').textContent = sub;
+}
+
+function updateYoloRunBtn() {
+  const btn = $('yoloRunBtn');
+  const hint = $('yoloRunHint');
+  if (!yoloModelLoaded) { btn.disabled = true; hint.textContent = 'Load model first'; }
+  else if (!currentImageEl) { btn.disabled = true; hint.textContent = 'Upload an image first'; }
+  else if (yoloIsRunning) { btn.disabled = true; btn.textContent = '⏳ Running...'; }
+  else { btn.disabled = false; btn.textContent = '▶ Run YOLO26'; hint.textContent = 'Ready — ' + YOLO26_REGISTRY[yoloSelectedModel].name; }
+}
+
+function yoloLog(msg, type = 'info') {
+  const now = new Date();
+  const ts = [now.getHours(), now.getMinutes(), now.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
+  const cls = { info:'log-info', ok:'log-ok', warn:'log-warn', err:'log-err' }[type] || 'log-info';
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = '<span class="log-ts">[' + ts + ']</span> <span class="' + cls + '">' + msg + '</span>';
+  $('yoloLogPanel').appendChild(line);
+  $('yoloLogPanel').scrollTop = $('yoloLogPanel').scrollHeight;
+}
+
+function clearYoloCanvas() {
+  const canvas = $('yoloCanvas');
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  $('yoloPerfCount').textContent = '—';
+}
+
+// ==================== YOLO26 WORKER ====================
+function createYoloWorker(modelKey) {
+  const cfg = YOLO26_REGISTRY[modelKey];
+  const workerCode = `
+import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/esm/ort.webgpu.bundle.min.js';
+let session = null;
+const TASK = '${cfg.task}';
+const MODEL_URL = '${cfg.url}';
+const INPUT_SIZE = 640;
+
+function preprocess(rgbaData, srcW, srcH) {
+  const tensor = new Float32Array(3 * INPUT_SIZE * INPUT_SIZE);
+  const scaleX = srcW / INPUT_SIZE, scaleY = srcH / INPUT_SIZE;
+  for (let y = 0; y < INPUT_SIZE; y++) {
+    for (let x = 0; x < INPUT_SIZE; x++) {
+      const sx = Math.min(Math.floor(x * scaleX), srcW - 1);
+      const sy = Math.min(Math.floor(y * scaleY), srcH - 1);
+      const si = (sy * srcW + sx) * 4, di = y * INPUT_SIZE + x;
+      tensor[di] = rgbaData[si] / 255;
+      tensor[INPUT_SIZE * INPUT_SIZE + di] = rgbaData[si+1] / 255;
+      tensor[2 * INPUT_SIZE * INPUT_SIZE + di] = rgbaData[si+2] / 255;
+    }
+  }
+  return tensor;
+}
+function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+
+self.onmessage = async (e) => {
+  const msg = e.data;
+  try {
+    if (msg.type === 'LOAD_MODEL') {
+      const device = msg.device || 'wasm';
+      self.postMessage({ type: 'YOLO_PROGRESS', progress: 0, message: 'Downloading...' });
+      let providers = ['wasm'];
+      if (device === 'webgpu') { try { providers = ['webgpu', 'wasm']; } catch(e) {} }
+
+      const modelBuffer = await fetch(MODEL_URL).then(async r => {
+        const reader = r.body.getReader();
+        const contentLength = +r.headers.get('Content-Length') || 0;
+        let received = 0; const chunks = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value); received += value.length;
+          if (contentLength > 0) self.postMessage({ type: 'YOLO_PROGRESS', progress: Math.round((received / contentLength) * 100), message: 'Downloading... ' + (received / 1048576).toFixed(1) + 'MB' });
+        }
+        const buf = new Uint8Array(received); let pos = 0;
+        for (const chunk of chunks) { buf.set(chunk, pos); pos += chunk.length; }
+        return buf.buffer;
+      });
+
+      self.postMessage({ type: 'YOLO_PROGRESS', progress: 95, message: 'Initializing ONNX session...' });
+      session = await ort.InferenceSession.create(modelBuffer, { executionProviders: providers, graphOptimizationLevel: 'all' });
+      self.postMessage({ type: 'YOLO_LOADED', provider: providers[0], inputNames: session.inputNames, outputNames: session.outputNames });
+
+    } else if (msg.type === 'RUN_INFERENCE') {
+      const { rgbaData, width, height, conf } = msg;
+      const tPre0 = performance.now();
+      const inputData = preprocess(new Uint8Array(rgbaData), width, height);
+      const inputTensor = new ort.Tensor('float32', inputData, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+      const tPre = Math.round(performance.now() - tPre0);
+
+      const tInf0 = performance.now();
+      const results = await session.run({ [session.inputNames[0]]: inputTensor });
+      const tInf = Math.round(performance.now() - tInf0);
+
+      self.postMessage({ type: 'YOLO_DEBUG', message: 'Outputs: ' + session.outputNames.map(n => n + '=' + JSON.stringify(Array.from(results[n].dims))).join(', ') });
+
+      const scaleX = width / INPUT_SIZE, scaleY = height / INPUT_SIZE;
+      const detections = [];
+
+      if (TASK === 'detect') {
+        const out = results[session.outputNames[0]]; const data = out.data;
+        for (let i = 0; i < out.dims[1]; i++) {
+          const b = i * 6, score = data[b+4];
+          if (score < conf) continue;
+          detections.push({ x1:data[b]*scaleX, y1:data[b+1]*scaleY, x2:data[b+2]*scaleX, y2:data[b+3]*scaleY, score, classId:Math.round(data[b+5]) });
+        }
+      } else if (TASK === 'pose') {
+        const out = results[session.outputNames[0]]; const data = out.data; const stride = out.dims[2];
+        for (let i = 0; i < out.dims[1]; i++) {
+          const b = i * stride, score = data[b+4];
+          if (score < conf) continue;
+          const keypoints = [];
+          for (let k = 0; k < 17; k++) { const kb = b+6+k*3; keypoints.push({ x:data[kb]*scaleX, y:data[kb+1]*scaleY, v:data[kb+2] }); }
+          detections.push({ x1:data[b]*scaleX, y1:data[b+1]*scaleY, x2:data[b+2]*scaleX, y2:data[b+3]*scaleY, score, classId:0, keypoints });
+        }
+      } else if (TASK === 'seg') {
+        const out0 = results[session.outputNames[0]], out1 = results[session.outputNames[1]];
+        const det = out0.data, proto = out1.data;
+        const PROTO_H = 160, PROTO_W = 160;
+        for (let i = 0; i < out0.dims[1]; i++) {
+          const b = i * 38, score = det[b+4];
+          if (score < conf) continue;
+          const classId = Math.round(det[b+5]);
+          const coeffs = det.slice(b+6, b+38);
+          const maskLogits = new Float32Array(PROTO_H * PROTO_W);
+          for (let p = 0; p < PROTO_H * PROTO_W; p++) { let v = 0; for (let c = 0; c < 32; c++) v += coeffs[c] * proto[c*PROTO_H*PROTO_W+p]; maskLogits[p] = v; }
+          const mask160 = new Uint8Array(PROTO_H * PROTO_W);
+          for (let p = 0; p < maskLogits.length; p++) mask160[p] = sigmoid(maskLogits[p]) > 0.5 ? 1 : 0;
+          detections.push({ x1:det[b]*scaleX, y1:det[b+1]*scaleY, x2:det[b+2]*scaleX, y2:det[b+3]*scaleY, score, classId, mask160:Array.from(mask160), maskW:PROTO_W, maskH:PROTO_H, maskScaleX:width/PROTO_W, maskScaleY:height/PROTO_H });
+        }
+      }
+      self.postMessage({ type: 'YOLO_RESULT', detections, task: TASK, preTime: tPre, infTime: tInf, imageW: width, imageH: height });
+    }
+  } catch(err) { self.postMessage({ type: 'YOLO_ERROR', message: err.message || String(err) }); }
+};
+`;
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  yoloWorker = new Worker(URL.createObjectURL(blob), { type: 'module' });
+  yoloWorker.onmessage = (e) => {
+    const msg = e.data;
+    switch (msg.type) {
+      case 'YOLO_PROGRESS':
+        $('yoloProgressWrap').style.display = 'block';
+        $('yoloProgressBar').style.width = msg.progress + '%';
+        $('yoloProgressMsg').textContent = msg.message || '';
+        setYoloStatus('loading', 'Loading... ' + msg.progress + '%', msg.message);
+        break;
+      case 'YOLO_LOADED':
+        yoloModelLoaded = true; yoloIsLoading = false;
+        $('yoloProgressWrap').style.display = 'none'; $('yoloProgressMsg').textContent = '';
+        $('yoloLoadBtn').disabled = true; $('yoloModelSelect').disabled = false;
+        $('yoloPerfBackend').textContent = (msg.provider || 'wasm').toUpperCase();
+        $('yoloPerfBackend').className = 'perf-value ' + (msg.provider === 'webgpu' ? 'perf-green' : 'perf-yellow');
+        setYoloStatus('ready', 'Model ready', YOLO26_REGISTRY[yoloSelectedModel].name + ' loaded');
+        yoloLog('Model loaded | inputs: ' + msg.inputNames.join(', ') + ' | outputs: ' + msg.outputNames.join(', '), 'ok');
+        updateYoloRunBtn();
+        break;
+      case 'YOLO_RESULT':
+        yoloIsRunning = false;
+        renderYoloResults(msg);
+        $('yoloPerfPre').textContent = msg.preTime + 'ms';
+        $('yoloPerfInf').textContent = msg.infTime + 'ms';
+        $('yoloPerfCount').textContent = msg.detections.length + ' objects';
+        $('yoloPerfCount').className = 'perf-value perf-green';
+        yoloLog('Done: ' + msg.detections.length + ' objects | pre=' + msg.preTime + 'ms inf=' + msg.infTime + 'ms', 'ok');
+        updateYoloRunBtn();
+        break;
+      case 'YOLO_DEBUG': yoloLog(msg.message, 'info'); break;
+      case 'YOLO_ERROR':
+        yoloIsRunning = false; yoloIsLoading = false;
+        setYoloStatus('error', 'Error', msg.message);
+        yoloLog('Error: ' + msg.message, 'err');
+        $('yoloLoadBtn').disabled = yoloModelLoaded;
+        $('yoloModelSelect').disabled = false;
+        updateYoloRunBtn();
+        break;
+    }
+  };
+  yoloWorker.onerror = (e) => yoloLog('Worker error: ' + e.message, 'err');
+}
+
+// ==================== YOLO26 LOAD / RUN ====================
+function loadYoloModel() {
+  if (yoloIsLoading || yoloModelLoaded) return;
+  yoloIsLoading = true;
+  $('yoloLoadBtn').disabled = true; $('yoloModelSelect').disabled = true;
+  const cfg = YOLO26_REGISTRY[yoloSelectedModel];
+  setYoloStatus('loading', 'Loading...', 'Initializing worker...');
+  $('yoloProgressWrap').style.display = 'block'; $('yoloProgressBar').style.width = '0%';
+  yoloLog('Loading ' + cfg.name + ' (' + cfg.size + ')...', 'info');
+  if (yoloWorker) yoloWorker.terminate();
+  createYoloWorker(yoloSelectedModel);
+  yoloWorker.postMessage({ type: 'LOAD_MODEL', device: selectedBackend });
+}
+
+function runYolo() {
+  if (!yoloModelLoaded || !currentImageEl || yoloIsRunning) return;
+  yoloIsRunning = true; updateYoloRunBtn();
+  const w = imageCanvas.width, h = imageCanvas.height;
+  const ctx = imageCanvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const rgbaClone = imageData.data.buffer.slice(0);
+  clearYoloCanvas();
+  yoloLog('Running ' + YOLO26_REGISTRY[yoloSelectedModel].name + ' on ' + w + 'x' + h + '...', 'info');
+  yoloWorker.postMessage({ type: 'RUN_INFERENCE', rgbaData: rgbaClone, width: w, height: h, conf: yoloConf, segStyle: yoloSegStyleVal }, [rgbaClone]);
+}
+
+// ==================== YOLO26 RENDERING ====================
+function renderYoloResults(msg) {
+  const canvas = $('yoloCanvas');
+  canvas.width = imageCanvas.width; canvas.height = imageCanvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const t0 = performance.now();
+  const { detections, task, imageW, imageH } = msg;
+  if (task === 'detect') renderDetections(ctx, detections);
+  else if (task === 'pose') renderPose(ctx, detections);
+  else if (task === 'seg') renderSegmentation(ctx, detections, imageW, imageH);
+  $('yoloPerfRender').textContent = Math.round(performance.now() - t0) + 'ms';
+}
+
+function renderDetections(ctx, detections) {
+  ctx.font = 'bold 13px system-ui,sans-serif'; ctx.textBaseline = 'top';
+  for (const d of detections) {
+    const color = classColor(d.classId);
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.strokeRect(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
+    const label = (COCO_CLASSES[d.classId] || 'cls' + d.classId) + ' ' + (d.score * 100).toFixed(0) + '%';
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = color; ctx.fillRect(d.x1, d.y1 - 20, tw + 8, 20);
+    ctx.fillStyle = '#000'; ctx.fillText(label, d.x1 + 4, d.y1 - 18);
+  }
+}
+
+function renderPose(ctx, detections) {
+  for (const d of detections) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
+    ctx.strokeRect(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
+    ctx.font = 'bold 11px system-ui,sans-serif'; ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(d.x1, d.y1, 70, 16);
+    ctx.fillStyle = '#fff'; ctx.fillText('person ' + (d.score * 100).toFixed(0) + '%', d.x1 + 3, d.y1 + 2);
+    if (!d.keypoints) continue;
+    const kpts = d.keypoints;
+    for (const [a, b] of POSE_SKELETON) {
+      if (kpts[a].v < 0.3 || kpts[b].v < 0.3) continue;
+      ctx.beginPath(); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+      ctx.moveTo(kpts[a].x, kpts[a].y); ctx.lineTo(kpts[b].x, kpts[b].y); ctx.stroke();
+    }
+    for (let k = 0; k < kpts.length; k++) {
+      if (kpts[k].v < 0.3) continue;
+      ctx.beginPath(); ctx.arc(kpts[k].x, kpts[k].y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = KPT_COLORS[k] || '#fff'; ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+}
+
+function renderSegmentation(ctx, detections, imageW, imageH) {
+  const style = yoloSegStyleVal;
+  if (style === 'outline-only' && imageW * imageH > 800000) {
+    yoloLog('Warning: outline mode is slow on large images — consider filled mode', 'warn');
+  }
+  const sorted = [...detections].sort((a, b) => ((b.x2-b.x1)*(b.y2-b.y1)) - ((a.x2-a.x1)*(a.y2-a.y1)));
+  for (const d of sorted) {
+    const color = classColor(d.classId);
+    if (d.mask160 && style !== 'box-only') {
+      const PH = d.maskH, PW = d.maskW, sx = imageW / PW, sy = imageH / PH;
+      if (style === 'filled-box' || style === 'filled-only') {
+        const maskImg = ctx.createImageData(imageW, imageH);
+        const hue = (d.classId * 37) % 360;
+        const c = hslToRgb(hue / 360, 0.8, 0.55);
+        for (let py = 0; py < imageH; py++) {
+          for (let px = 0; px < imageW; px++) {
+            const mx = Math.min(Math.floor(px / sx), PW - 1);
+            const my = Math.min(Math.floor(py / sy), PH - 1);
+            if (d.mask160[my * PW + mx]) {
+              const idx = (py * imageW + px) * 4;
+              maskImg.data[idx] = c[0]; maskImg.data[idx+1] = c[1]; maskImg.data[idx+2] = c[2]; maskImg.data[idx+3] = 120;
+            }
+          }
+        }
+        ctx.putImageData(maskImg, 0, 0);
+      }
+      if (style === 'outline-only') {
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+        for (let py = 1; py < imageH - 1; py++) {
+          for (let px = 1; px < imageW - 1; px++) {
+            const mx = Math.min(Math.floor(px / sx), PW-1), my = Math.min(Math.floor(py / sy), PH-1);
+            if (!d.mask160[my*PW+mx]) continue;
+            const mxL = Math.min(Math.floor((px-1)/sx),PW-1), mxR = Math.min(Math.floor((px+1)/sx),PW-1);
+            const myT = Math.min(Math.floor((py-1)/sy),PH-1), myB = Math.min(Math.floor((py+1)/sy),PH-1);
+            if (!d.mask160[my*PW+mxL] || !d.mask160[my*PW+mxR] || !d.mask160[myT*PW+mx] || !d.mask160[myB*PW+mx]) ctx.rect(px, py, 1, 1);
+          }
+        }
+        ctx.fill();
+      }
+    }
+    if (style === 'filled-box' || style === 'box-only') {
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
+    }
+    if (style !== 'outline-only') {
+      ctx.font = 'bold 12px system-ui,sans-serif'; ctx.textBaseline = 'top';
+      const label = (COCO_CLASSES[d.classId] || 'cls'+d.classId) + ' ' + (d.score * 100).toFixed(0) + '%';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = color; ctx.fillRect(d.x1, d.y1 - 20, tw + 8, 20);
+      ctx.fillStyle = '#000'; ctx.fillText(label, d.x1 + 4, d.y1 - 18);
+    }
+  }
+}
+
+function hslToRgb(h, s, l) {
+  let r, g, b;
+  if (s === 0) { r = g = b = l; } else {
+    const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1/6) return p + (q-p)*6*t; if (t < 1/2) return q; if (t < 2/3) return p + (q-p)*(2/3-t)*6; return p; };
+    const q = l < 0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+    r = hue2rgb(p,q,h+1/3); g = hue2rgb(p,q,h); b = hue2rgb(p,q,h-1/3);
+  }
+  return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+}
 
 // ===================== INIT =====================
 (async () => {
