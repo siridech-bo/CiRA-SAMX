@@ -776,61 +776,42 @@ self.onmessage = async (e) => {
 
       let maskData, maskW, maskH, score;
 
-      // --- Build prompt tensors manually (no image re-processing) ---
-      // imageReshapedSizes can be a Tensor with .data or a nested array [[h, w]]
-      let reshapedH, reshapedW;
-      if (imageReshapedSizes.data) {
-        reshapedH = Number(imageReshapedSizes.data[0]);
-        reshapedW = Number(imageReshapedSizes.data[1]);
-      } else if (Array.isArray(imageReshapedSizes)) {
-        const inner = Array.isArray(imageReshapedSizes[0]) ? imageReshapedSizes[0] : imageReshapedSizes;
-        reshapedH = Number(inner[0]);
-        reshapedW = Number(inner[1]);
-      } else {
-        // Fallback: use original image size
-        reshapedH = currentRawImage.height;
-        reshapedW = currentRawImage.width;
-      }
-      self.postMessage({ type: 'DEBUG', message: 'Reshaped size: ' + reshapedW + 'x' + reshapedH + ' | imageReshapedSizes type: ' + typeof imageReshapedSizes + (imageReshapedSizes?.dims ? ' dims: ' + JSON.stringify(imageReshapedSizes.dims) : '') });
-
-      let modelInputs = { ...cachedProcessorInputs, ...imageEmbeddings };
-
+      // --- Use processor for prompt formatting (CPU-only, fast) ---
+      // The processor handles coordinate scaling, tensor shaping, and data types.
+      // We then merge with cached imageEmbeddings so the model skips the encoder.
       const hasPoints = points && points.length > 0;
       const hasBox = box && box.length === 4;
 
-      // Scale coordinates from original image space → reshaped image space
-      const origH = Number(imageOriginalSizes.data ? imageOriginalSizes.data[0] : (Array.isArray(imageOriginalSizes[0]) ? imageOriginalSizes[0][0] : imageOriginalSizes[0]));
-      const origW = Number(imageOriginalSizes.data ? imageOriginalSizes.data[1] : (Array.isArray(imageOriginalSizes[0]) ? imageOriginalSizes[0][1] : imageOriginalSizes[1]));
-      const scaleX = reshapedW / origW;
-      const scaleY = reshapedH / origH;
-
-      self.postMessage({ type: 'DEBUG', message: 'Coords: orig ' + origW + 'x' + origH + ' → reshaped ' + reshapedW + 'x' + reshapedH + ' | scale ' + scaleX.toFixed(3) + ',' + scaleY.toFixed(3) });
-
+      const procOpts = {};
       if (hasPoints) {
-        // Scale points from original → reshaped coordinate space
-        const scaledPts = points.map(p => [p[0] * scaleX, p[1] * scaleY]);
-        modelInputs.input_points = new Tensor('float32',
-          new Float32Array(scaledPts.flat()), [1, 1, scaledPts.length, 2]);
-        modelInputs.input_labels = new Tensor('int64',
-          BigInt64Array.from(labels.map(BigInt)), [1, 1, labels.length]);
+        if (API === 'sam1') {
+          procOpts.input_points = [points.map(p => [p[0], p[1]])];
+          procOpts.input_labels = [labels];
+        } else {
+          procOpts.input_points = [[points.map(p => [p[0], p[1]])]];
+          procOpts.input_labels = [[labels]];
+        }
       }
-
       if (hasBox) {
-        const [x1, y1, x2, y2] = box;
-        // Scale box from original → reshaped coordinate space
-        modelInputs.input_boxes = new Tensor('float32',
-          new Float32Array([x1 * scaleX, y1 * scaleY, x2 * scaleX, y2 * scaleY]), [1, 1, 4]);
-        if (!hasPoints) {
-          const cx = (x1 + x2) / 2 * scaleX;
-          const cy = (y1 + y2) / 2 * scaleY;
-          modelInputs.input_points = new Tensor('float32',
-            new Float32Array([cx, cy]), [1, 1, 1, 2]);
-          modelInputs.input_labels = new Tensor('int64',
-            BigInt64Array.from([1n]), [1, 1, 1]);
+        if (API === 'sam1') {
+          procOpts.input_boxes = [[box]];
+          if (!hasPoints) {
+            const cx = Math.round((box[0] + box[2]) / 2);
+            const cy = Math.round((box[1] + box[3]) / 2);
+            procOpts.input_points = [[[cx, cy]]];
+            procOpts.input_labels = [[1]];
+          }
+        } else {
+          procOpts.input_boxes = [[[box[0], box[1], box[2], box[3]]]];
         }
       }
 
-      // Text prompt (SAM3 only)
+      // Processor formats prompts + re-processes image (CPU resize, ~50ms)
+      const inputs = await processor(currentRawImage, procOpts);
+      // Merge with cached encoder output — model skips encoder, runs decoder only
+      const modelInputs = { ...inputs, ...imageEmbeddings };
+
+      // Text prompt (SAM3 only — add tokenized text to model inputs)
       if (msg.textPrompt && API === 'sam3') {
         try {
           const { AutoTokenizer } = await import(
@@ -842,14 +823,14 @@ self.onmessage = async (e) => {
           const textInputs = await self._tokenizer(msg.textPrompt, {
             padding: true, truncation: true
           });
-          modelInputs = { ...modelInputs, ...textInputs };
+          Object.assign(modelInputs, textInputs);
           self.postMessage({ type: 'DEBUG', message: 'SAM3 text inputs keys: ' + Object.keys(textInputs).join(', ') });
         } catch (tokErr) {
           self.postMessage({ type: 'DEBUG', message: 'SAM3 tokenizer warning: ' + tokErr.message + ' — running without text tokens' });
         }
       }
 
-      // Run model — encoder is skipped because imageEmbeddings keys are present
+      // Run model — encoder is skipped because imageEmbeddings keys override pixel_values
       const outputs = await model(modelInputs);
 
       self.postMessage({ type: 'DEBUG', message: API.toUpperCase() +
@@ -859,7 +840,7 @@ self.onmessage = async (e) => {
       });
 
       const masks = await processor.post_process_masks(
-        outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
+        outputs.pred_masks, inputs.original_sizes, inputs.reshaped_input_sizes
       );
       const result = extractMask(masks, outputs);
       maskData = result.maskData; maskW = result.maskW;
