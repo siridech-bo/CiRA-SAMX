@@ -330,6 +330,7 @@
     <select id="modelSelect" class="model-select" onchange="onModelChange()">
       <option value="sam1" selected>SAM 1 — ViT-B (Xenova/sam-vit-base)</option>
       <option value="sam2">SAM 2 — Hiera-Tiny (sam2-hiera-tiny-ONNX)</option>
+      <option value="sam2small">SAM 2 — Hiera-Small (sam2-hiera-small-ONNX)</option>
       <option value="sam3">SAM 3 — Tracker (sam3-tracker-ONNX)</option>
     </select>
     <div id="modelDesc" class="model-desc">~93M params · ~375MB · ViT-B encoder · fp32</div>
@@ -483,6 +484,15 @@ const MODEL_REGISTRY = {
     size: '~134MB',
     arch: 'Hiera-Tiny encoder',
     desc: '~39M params · ~134MB · Hiera-Tiny encoder · fp32',
+  },
+  sam2small: {
+    id: 'onnx-community/sam2-hiera-small-ONNX',
+    name: 'SAM 2 Hiera-Small',
+    api: 'sam2',
+    params: '~46M',
+    size: '~250MB',
+    arch: 'Hiera-Small encoder',
+    desc: '~46M params · ~250MB · Hiera-Small encoder · fp32',
   },
   sam3: {
     id: 'onnx-community/sam3-tracker-ONNX',
@@ -751,8 +761,13 @@ self.onmessage = async (e) => {
         // Save real image sizes for post_process_masks later
         imageOriginalSizes = inputs.original_sizes;
         imageReshapedSizes = inputs.reshaped_input_sizes;
+      } else {
+        // SAM2/SAM3: pre-encode image and cache features
+        const inputs = await processor(currentRawImage);
+        imageEmbeddings = await model.get_image_embeddings(inputs);
+        imageOriginalSizes = inputs.original_sizes;
+        imageReshapedSizes = inputs.reshaped_input_sizes;
       }
-      // SAM2/SAM3: no separate embedding step — done at predict time
 
       const encoderTime = Math.round(performance.now() - t0);
       self.postMessage({ type: 'IMAGE_SET', encoderTime });
@@ -809,8 +824,19 @@ self.onmessage = async (e) => {
           throw new Error('Could not extract mask tensor from output');
         }
 
-        const dims = maskContainer.dims;
-        const scores = outputs.iou_scores ? Array.from(outputs.iou_scores.data) : [0];
+        // Squeeze leading size-1 dims: SAM2's [1,1,3,H,W] → [3,H,W]
+        let dims = [...maskContainer.dims];
+        while (dims.length > 3 && dims[0] === 1) {
+          dims = dims.slice(1);
+        }
+
+        // SAM1 uses 'iou_scores', SAM2/SAM3 uses 'pred_iou_scores'
+        const scoresTensor = outputs.iou_scores || outputs.pred_iou_scores;
+        let scores = scoresTensor ? Array.from(scoresTensor.data) : [0];
+        // Flatten scores if nested (e.g. [1,1,3] → [3])
+        while (scores.length === 1 && Array.isArray(scores[0])) {
+          scores = scores[0];
+        }
 
         if (dims.length === 3) {
           // Multiple masks: [numMasks, H, W] — pick best by IoU
@@ -849,10 +875,12 @@ self.onmessage = async (e) => {
         const result = extractMask(masks, outputs);
         maskData = result.maskData; maskW = result.maskW; maskH = result.maskH; score = result.score;
       } else {
+        // SAM2/SAM3: re-use cached image embeddings, only run decoder
         const inputs = await processor(currentRawImage, procOpts);
-        const outputs = await model(inputs);
+        const outputs = await model({ ...inputs, ...imageEmbeddings });
+        self.postMessage({ type: 'DEBUG', message: 'SAM2/3 outputs keys: ' + Object.keys(outputs).join(', ') + ', pred_masks dims: ' + JSON.stringify(outputs.pred_masks?.dims) + ', pred_iou_scores dims: ' + JSON.stringify(outputs.pred_iou_scores?.dims) + ', iou_scores dims: ' + JSON.stringify(outputs.iou_scores?.dims) });
         const masks = await processor.post_process_masks(
-          outputs.pred_masks, inputs.original_sizes, inputs.reshaped_input_sizes
+          outputs.pred_masks, imageOriginalSizes, imageReshapedSizes
         );
         const result = extractMask(masks, outputs);
         maskData = result.maskData; maskW = result.maskW; maskH = result.maskH; score = result.score;
@@ -1057,7 +1085,7 @@ function encodeImage() {
   if (modelCfg.api === 'sam1') {
     log('Encoding image (SAM1 pre-embedding)...', 'info');
   } else {
-    log('Sending image to worker (SAM2/3 — encoding at predict time)...', 'info');
+    log('Encoding image (SAM2/3 pre-embedding)...', 'info');
   }
   updateInfoBar();
   worker.postMessage({

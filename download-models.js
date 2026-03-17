@@ -28,6 +28,16 @@ const MODELS = {
     'onnx/prompt_encoder_mask_decoder.onnx',
     'onnx/prompt_encoder_mask_decoder.onnx_data',
   ],
+  // SAM 2 Hiera-Small
+  'onnx-community/sam2-hiera-small-ONNX': [
+    'config.json',
+    'preprocessor_config.json',
+    'processor_config.json',
+    'onnx/vision_encoder.onnx',
+    'onnx/vision_encoder.onnx_data',
+    'onnx/prompt_encoder_mask_decoder.onnx',
+    'onnx/prompt_encoder_mask_decoder.onnx_data',
+  ],
   // SAM 3 Tracker
   'onnx-community/sam3-tracker-ONNX': [
     'config.json',
