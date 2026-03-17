@@ -36,7 +36,14 @@ if (hasLocalModels) {
   }));
 }
 
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, {
+  setHeaders: (res, path) => {
+    // Allow blob workers to import local JS/WASM files under COEP
+    if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.wasm')) {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+  }
+}));
 
 app.listen(PORT, () => {
   console.log('');

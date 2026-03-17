@@ -1524,6 +1524,10 @@ function clearPoints() {
 // ===================== INFO BAR =====================
 function updateInfoBar() {
   if (!currentImageEl) { infoBar.textContent = ''; return; }
+  if (currentTab === 'yolo') {
+    infoBar.textContent = yoloModelLoaded ? 'Click "Run YOLO26" to detect objects' : 'Switch to YOLO26 tab and load a model';
+    return;
+  }
   if (!modelLoaded && !isLoadingModel) {
     infoBar.textContent = 'Load the SAM model first, then click to segment';
   } else if (isLoadingModel) {
@@ -1658,7 +1662,11 @@ function clearYoloCanvas() {
 function createYoloWorker(modelKey) {
   const cfg = YOLO26_REGISTRY[modelKey];
   const workerCode = `
-import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/esm/ort.webgpu.bundle.min.js';
+// Import ONNX Runtime from local server (served with CORP headers)
+import * as ort from '${location.origin}/node_modules/onnxruntime-web/dist/ort.all.bundle.min.mjs';
+
+self.postMessage({ type: 'YOLO_DEBUG', message: 'ONNX Runtime loaded from local server' });
+
 let session = null;
 const TASK = '${cfg.task}';
 const MODEL_URL = '${cfg.url}';
@@ -1706,7 +1714,7 @@ self.onmessage = async (e) => {
       });
 
       self.postMessage({ type: 'YOLO_PROGRESS', progress: 95, message: 'Initializing ONNX session...' });
-      session = await ort.InferenceSession.create(modelBuffer, { executionProviders: providers, graphOptimizationLevel: 'all' });
+      session = await ort.InferenceSession.create(modelBuffer, { executionProviders: providers });
       self.postMessage({ type: 'YOLO_LOADED', provider: providers[0], inputNames: session.inputNames, outputNames: session.outputNames });
 
     } else if (msg.type === 'RUN_INFERENCE') {
@@ -1726,11 +1734,33 @@ self.onmessage = async (e) => {
       const detections = [];
 
       if (TASK === 'detect') {
-        const out = results[session.outputNames[0]]; const data = out.data;
-        for (let i = 0; i < out.dims[1]; i++) {
-          const b = i * 6, score = data[b+4];
+        // YOLO26 NMS-free output: logits=[1,300,80], pred_boxes=[1,300,4] (cx,cy,w,h normalized)
+        const logitsOut = results['logits'] || results[session.outputNames[0]];
+        const boxesOut = results['pred_boxes'] || results[session.outputNames[1]];
+        const logits = logitsOut.data;
+        const boxes = boxesOut.data;
+        const numDet = logitsOut.dims[1]; // 300
+        const numClasses = logitsOut.dims[2]; // 80
+
+        for (let i = 0; i < numDet; i++) {
+          // Find best class
+          let bestClass = 0, bestScore = -Infinity;
+          for (let c = 0; c < numClasses; c++) {
+            const s = logits[i * numClasses + c];
+            if (s > bestScore) { bestScore = s; bestClass = c; }
+          }
+          // Sigmoid to get probability
+          const score = 1 / (1 + Math.exp(-bestScore));
           if (score < conf) continue;
-          detections.push({ x1:data[b]*scaleX, y1:data[b+1]*scaleY, x2:data[b+2]*scaleX, y2:data[b+3]*scaleY, score, classId:Math.round(data[b+5]) });
+
+          // Convert cx,cy,w,h (normalized 0-1) to x1,y1,x2,y2 (pixel coords)
+          const cx = boxes[i*4] * width, cy = boxes[i*4+1] * height;
+          const bw = boxes[i*4+2] * width, bh = boxes[i*4+3] * height;
+          detections.push({
+            x1: cx - bw/2, y1: cy - bh/2,
+            x2: cx + bw/2, y2: cy + bh/2,
+            score, classId: bestClass
+          });
         }
       } else if (TASK === 'pose') {
         const out = results[session.outputNames[0]]; const data = out.data; const stride = out.dims[2];
