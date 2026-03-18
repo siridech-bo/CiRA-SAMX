@@ -67,7 +67,7 @@
   .tab-btn.tab-active {
     background: var(--accent); color: #fff; border-color: var(--accent);
   }
-  #florenceCanvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+  #florenceCanvas { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 3; display: none; }
   #florenceTextResult {
     margin-top: 10px; width: 100%; max-width: 900px; background: var(--surface);
     border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
@@ -1629,6 +1629,10 @@ function updateInfoBar() {
     infoBar.textContent = yoloModelLoaded ? 'Click "Run YOLO26" to detect objects' : 'Switch to YOLO26 tab and load a model';
     return;
   }
+  if (currentTab === 'florence') {
+    infoBar.textContent = florModelLoaded ? 'Select a task and click "Run Florence-2"' : 'Switch to Florence-2 tab and load a model';
+    return;
+  }
   if (!modelLoaded && !isLoadingModel) {
     infoBar.textContent = 'Load the SAM model first, then click to segment';
   } else if (isLoadingModel) {
@@ -1708,10 +1712,14 @@ function switchTab(tab) {
   $('tabSam').className = 'tab-btn' + (tab === 'sam' ? ' tab-active' : '');
   $('tabYolo').className = 'tab-btn' + (tab === 'yolo' ? ' tab-active' : '');
   $('tabFlorence').className = 'tab-btn' + (tab === 'florence' ? ' tab-active' : '');
-  const fc = $('florenceCanvas');
+  // Show/hide overlay canvases per tab
+  const mc = $('maskCanvas'), yc = $('yoloCanvas'), fc = $('florenceCanvas');
+  if (mc) mc.style.display = tab === 'sam' ? 'block' : 'none';
+  if (yc) yc.style.display = tab === 'yolo' ? 'block' : 'none';
   if (fc) fc.style.display = tab === 'florence' ? 'block' : 'none';
   $('florenceTextResult').style.display = 'none';
   if (tab === 'florence') updateFlorBoxStatus();
+  updateInfoBar();
 }
 
 function onYoloModelChange() {
