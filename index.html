@@ -2359,8 +2359,8 @@ self.onmessage = async (e) => {
         parsed = processor.post_process_generation(generatedText, taskTag, [width, height]);
       } catch(ppErr) {
         // Some tasks (e.g. polygon-based) may not be implemented in Transformers.js yet
-        self.postMessage({ type: 'FLOR_ERROR', message: 'Post-processing not supported for <' + task + '>: ' + ppErr.message + '. Raw output shown in text panel.' });
-        // Send raw text as fallback
+        // Not a fatal error — main thread will parse loc tokens from raw text
+        // Send raw text as result (not error)
         self.postMessage({ type: 'FLOR_RESULT', task, parsed: { ['<' + task + '>']: generatedText }, rawText: generatedText, genTime: Math.round(performance.now() - t0), imageW: width, imageH: height });
         return;
       }
