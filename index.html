@@ -2273,14 +2273,18 @@ function clearFlorenceCanvas() {
 }
 function reRenderFlorence() { if (florLastResult) renderFlorenceResult(florLastResult); }
 
-function drawFlorenceBox() {
+function drawFlorenceBox(clearFirst) {
   const canvas = $('florenceCanvas');
   if (!canvas || !currentBox) return;
-  canvas.width = imageCanvas.width;
-  canvas.height = imageCanvas.height;
-  canvas.style.display = 'block';
+  // Only reset canvas when called standalone (not after polygon render)
+  if (clearFirst !== false) {
+    canvas.width = imageCanvas.width;
+    canvas.height = imageCanvas.height;
+    canvas.style.display = 'block';
+    const ctx2 = canvas.getContext('2d');
+    ctx2.clearRect(0, 0, canvas.width, canvas.height);
+  }
   const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
   const b = currentBox;
   // Dashed box
   ctx.strokeStyle = 'rgba(99, 102, 241, 0.9)';
@@ -2581,8 +2585,8 @@ function renderFlorenceResult(msg) {
     $('florPerfCount').textContent='see text panel'; florLog('Unknown format — shown in text panel','warn');
   }
 
-  // Redraw Florence box overlay if present
-  if (currentBox && FLOR_BOX_TASKS.has(task)) drawFlorenceBox();
+  // Redraw Florence box overlay if present (don't clear — preserve polygon)
+  if (currentBox && FLOR_BOX_TASKS.has(task)) drawFlorenceBox(false);
 }
 
 // ===================== INIT =====================
