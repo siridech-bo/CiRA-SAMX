@@ -564,7 +564,7 @@
     </div>
     <div class="section" id="florBoxSection" style="display:none">
       <div class="section-title">Canvas Region <span class="task-chip chip-box">DRAW BOX</span></div>
-      <div style="font-size:11px;color:var(--text2)">Draw a box on the image (SAM tab → Box mode) first.</div>
+      <div style="font-size:11px;color:var(--text2)">Click and drag on the image to draw a bounding box.</div>
       <div id="florBoxStatus" style="font-size:11px;margin-top:6px;color:var(--yellow)">No box drawn yet</div>
     </div>
     <div class="section">
@@ -1317,9 +1317,14 @@ function getCanvasCoords(e) {
   };
 }
 
+// Check if Florence box-grounded task is active
+function isFlorenceBoxMode() {
+  return currentTab === 'florence' && FLOR_BOX_TASKS && FLOR_BOX_TASKS.has(florSelectedTask);
+}
+
 canvasWrap.addEventListener('mousedown', (e) => {
   if (!currentImageEl || currentMode === 'prompt') return;
-  if (currentMode === 'box') {
+  if (currentMode === 'box' || isFlorenceBoxMode()) {
     isDrawingBox = true;
     const c = getCanvasCoords(e);
     boxStart = { x: c.x, y: c.y, clientX: c.clientX, clientY: c.clientY };
@@ -1362,17 +1367,22 @@ canvasWrap.addEventListener('mouseup', (e) => {
   }
 
   currentBox = { x1, y1, x2, y2 };
-  points = []; // Box replaces points
-  updatePointsUI();
+  if (currentTab === 'sam') {
+    points = []; // Box replaces points in SAM mode
+    updatePointsUI();
+  }
   log(`Box drawn: (${x1},${y1}) to (${x2},${y2})`, 'info');
+  if (currentTab === 'florence') florLog(`Box drawn: (${x1},${y1}) to (${x2},${y2})`, 'info');
   drawBoxAndPoints();
   updateSegmentBtn();
   updateInfoBar();
+  updateFlorBoxStatus();
+  updateFlorRunBtn();
   boxStart = null;
 });
 
 canvasWrap.addEventListener('click', (e) => {
-  if (!currentImageEl || currentMode === 'box' || currentMode === 'prompt') return;
+  if (!currentImageEl || currentMode === 'box' || currentMode === 'prompt' || isFlorenceBoxMode()) return;
   const c = getCanvasCoords(e);
   const label = currentMode === 'positive' ? 1 : 0;
 
@@ -1718,7 +1728,11 @@ function switchTab(tab) {
   if (yc) yc.style.display = tab === 'yolo' ? 'block' : 'none';
   if (fc) fc.style.display = tab === 'florence' ? 'block' : 'none';
   $('florenceTextResult').style.display = 'none';
-  if (tab === 'florence') updateFlorBoxStatus();
+  if (tab === 'florence') {
+    updateFlorBoxStatus();
+    // Set crosshair cursor for box-grounded tasks
+    if (canvasWrap) canvasWrap.style.cursor = FLOR_BOX_TASKS.has(florSelectedTask) ? 'crosshair' : 'default';
+  }
   updateInfoBar();
 }
 
