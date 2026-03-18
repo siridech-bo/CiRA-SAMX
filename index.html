@@ -2349,13 +2349,10 @@ self.onmessage = async (e) => {
       }
       const prompts = processor.construct_prompts(taskTag);
       const visionInputs = await processor(rawImage);
-      // Tokenizer expects matching types: if text_pair is provided, both must be strings or arrays
-      let textInputs;
-      if (textInputForTask) {
-        textInputs = tokenizer([prompts], { text_pair: [textInputForTask], padding:true, truncation:true });
-      } else {
-        textInputs = tokenizer(prompts, { padding:false, truncation:true });
-      }
+      // Concatenate text input (loc tokens or text query) directly after the task prompt
+      // Using text_pair would insert separator tokens that corrupt Florence-2 input
+      const fullPrompt = textInputForTask ? prompts + textInputForTask : prompts;
+      const textInputs = tokenizer(fullPrompt, { padding:true, truncation:true });
       const generatedIds = await model.generate({ ...visionInputs, ...textInputs, max_new_tokens:1024, num_beams:3, do_sample:false });
       const generatedText = tokenizer.batch_decode(generatedIds, { skip_special_tokens:false })[0];
       let parsed;
