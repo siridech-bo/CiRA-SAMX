@@ -560,7 +560,10 @@
     </div>
     <div class="section" id="florTextSection" style="display:none">
       <div class="section-title">Text Input <span class="task-chip chip-text">REQUIRED</span></div>
-      <textarea id="florTextInput" class="prompt-input" rows="2" placeholder="e.g. 'person in orange helmet'" oninput="updateFlorRunBtn()"></textarea>
+      <textarea id="florTextInput" class="prompt-input" rows="2" placeholder="Use descriptive phrases, not keywords.&#10;e.g. 'yellow safety helmet worn by the person'" oninput="updateFlorRunBtn()"></textarea>
+    </div>
+    <div id="florLargeModelHint" style="display:none;font-size:10px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:6px;padding:7px 10px;margin:0 16px;color:#a5b4fc;line-height:1.6">
+      <strong>large-ft</strong> gives significantly better polygon accuracy for this task. Current model: <span id="florCurrentModelHint">base-ft</span>
     </div>
     <div class="section" id="florBoxSection" style="display:none">
       <div class="section-title">Canvas Region <span class="task-chip chip-box">DRAW BOX</span></div>
@@ -2212,7 +2215,7 @@ const FLOR_MODEL_IDS = { 'base-ft':'onnx-community/Florence-2-base-ft', 'base':'
 const FLOR_TEXT_TASKS = new Set(['CAPTION_TO_PHRASE_GROUNDING','REFERRING_EXPRESSION_SEGMENTATION','OPEN_VOCABULARY_DETECTION']);
 const FLOR_BOX_TASKS = new Set(['REGION_TO_SEGMENTATION','REGION_TO_CATEGORY','REGION_TO_DESCRIPTION']);
 const FLOR_TEXT_OUTPUT_TASKS = new Set(['CAPTION','DETAILED_CAPTION','MORE_DETAILED_CAPTION','OCR','REGION_TO_CATEGORY','REGION_TO_DESCRIPTION']);
-const FLOR_TASK_DESCS = { CAPTION:'Brief one-sentence description.', DETAILED_CAPTION:'Detailed image description.', MORE_DETAILED_CAPTION:'Most comprehensive description.', OD:'All objects with bounding boxes and labels.', DENSE_REGION_CAPTION:'Caption every salient region.', REGION_PROPOSAL:'Candidate object regions (unlabeled).', CAPTION_TO_PHRASE_GROUNDING:'Type a sentence → locates each noun phrase.', REFERRING_EXPRESSION_SEGMENTATION:'Type object name → polygon mask.', OPEN_VOCABULARY_DETECTION:'Type any class → finds instances.', REGION_TO_SEGMENTATION:'Draw box → segmentation polygon.', REGION_TO_CATEGORY:'Draw box → category label.', REGION_TO_DESCRIPTION:'Draw box → text description.', OCR:'Extract all text from image.', OCR_WITH_REGION:'Text + bounding boxes.' };
+const FLOR_TASK_DESCS = { CAPTION:'Brief one-sentence description.', DETAILED_CAPTION:'Detailed image description.', MORE_DETAILED_CAPTION:'Most comprehensive description.', OD:'All objects with bounding boxes and labels.', DENSE_REGION_CAPTION:'Caption every salient region.', REGION_PROPOSAL:'Candidate object regions (unlabeled).', CAPTION_TO_PHRASE_GROUNDING:'Type a sentence → locates each noun phrase.', REFERRING_EXPRESSION_SEGMENTATION:'Type a descriptive phrase (not a single keyword) → polygon mask. Tip: include color, position, or context for better accuracy.', OPEN_VOCABULARY_DETECTION:'Type any class → finds instances.', REGION_TO_SEGMENTATION:'Draw box → segmentation polygon.', REGION_TO_CATEGORY:'Draw box → category label.', REGION_TO_DESCRIPTION:'Draw box → text description.', OCR:'Extract all text from image.', OCR_WITH_REGION:'Text + bounding boxes.' };
 
 // roundRect polyfill
 if (!CanvasRenderingContext2D.prototype.roundRect) {
@@ -2226,6 +2229,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 // ==================== FLORENCE-2 UI ====================
 function onFlorModelChange() {
   florSelectedModel = $('florModelSelect').value;
+  onFlorTaskChange(); // refresh large-ft hint
   if (florModelLoaded || florIsLoading) {
     florModelLoaded = false; florIsLoading = false;
     if (florWorker) { florWorker.terminate(); florWorker = null; }
@@ -2239,6 +2243,14 @@ function onFlorTaskChange() {
   $('florTaskDesc').textContent = FLOR_TASK_DESCS[florSelectedTask] || '';
   $('florTextSection').style.display = FLOR_TEXT_TASKS.has(florSelectedTask) ? '' : 'none';
   $('florBoxSection').style.display = FLOR_BOX_TASKS.has(florSelectedTask) ? '' : 'none';
+  // Show large-ft hint for grounding/segmentation tasks when using base model
+  const hint = $('florLargeModelHint');
+  if (hint) {
+    const needsLarge = florSelectedTask === 'REFERRING_EXPRESSION_SEGMENTATION' || florSelectedTask === 'CAPTION_TO_PHRASE_GROUNDING';
+    const isBase = florSelectedModel === 'base' || florSelectedModel === 'base-ft';
+    hint.style.display = (needsLarge && isBase) ? '' : 'none';
+    $('florCurrentModelHint').textContent = florSelectedModel;
+  }
   updateFlorBoxStatus();
   updateFlorRunBtn();
 }
@@ -2470,6 +2482,10 @@ function runFlorence() {
   const rgbaClone = imageData.data.buffer.slice(0);
   const textInput = FLOR_TEXT_TASKS.has(florSelectedTask) ? ($('florTextInput')?.value.trim()||'') : '';
   const boxInput = FLOR_BOX_TASKS.has(florSelectedTask) && currentBox ? {x1:currentBox.x1,y1:currentBox.y1,x2:currentBox.x2,y2:currentBox.y2} : null;
+  const aspectRatio = w / h;
+  if (aspectRatio > 2.5 || aspectRatio < 0.4) {
+    florLog('\u26a0\ufe0f High aspect ratio ('+aspectRatio.toFixed(1)+':1) \u2014 objects near image edges may have lower accuracy due to letterboxing', 'warn');
+  }
   florLog('Running <'+florSelectedTask+'>'+(textInput?' "'+textInput+'"':'')+'...','info');
   florWorker.postMessage({ type:'FLOR_RUN', rgbaData:rgbaClone, width:w, height:h, task:florSelectedTask, textInput:textInput||null, boxInput }, [rgbaClone]);
 }
