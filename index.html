@@ -1372,8 +1372,12 @@ canvasWrap.addEventListener('mouseup', (e) => {
     updatePointsUI();
   }
   log(`Box drawn: (${x1},${y1}) to (${x2},${y2})`, 'info');
-  if (currentTab === 'florence') florLog(`Box drawn: (${x1},${y1}) to (${x2},${y2})`, 'info');
-  drawBoxAndPoints();
+  if (currentTab === 'florence') {
+    florLog(`Box drawn: (${x1},${y1}) to (${x2},${y2})`, 'info');
+    drawFlorenceBox();
+  } else {
+    drawBoxAndPoints();
+  }
   updateSegmentBtn();
   updateInfoBar();
   updateFlorBoxStatus();
@@ -2268,6 +2272,35 @@ function clearFlorenceCanvas() {
   $('florenceTextResult').style.display='none'; florLastResult=null; $('florPerfCount').textContent='—';
 }
 function reRenderFlorence() { if (florLastResult) renderFlorenceResult(florLastResult); }
+
+function drawFlorenceBox() {
+  const canvas = $('florenceCanvas');
+  if (!canvas || !currentBox) return;
+  canvas.width = imageCanvas.width;
+  canvas.height = imageCanvas.height;
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const b = currentBox;
+  // Dashed box
+  ctx.strokeStyle = 'rgba(99, 102, 241, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+  ctx.setLineDash([]);
+  // Semi-transparent fill
+  ctx.fillStyle = 'rgba(99, 102, 241, 0.08)';
+  ctx.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+  // Label
+  ctx.font = 'bold 11px system-ui,sans-serif';
+  ctx.textBaseline = 'top';
+  const label = 'Region: ' + (b.x2 - b.x1) + 'x' + (b.y2 - b.y1);
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(99,102,241,0.8)';
+  ctx.fillRect(b.x1, b.y1 - 18, tw + 8, 16);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, b.x1 + 4, b.y1 - 16);
+}
 
 // ==================== FLORENCE-2 WORKER ====================
 function createFlorenceWorker() {
