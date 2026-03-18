@@ -48,6 +48,38 @@ const MODELS = {
     'onnx/prompt_encoder_mask_decoder.onnx',
     'onnx/prompt_encoder_mask_decoder.onnx_data',
   ],
+  // Florence-2-base-ft (dtype: embed_tokens=fp16, vision_encoder=fp16, encoder_model=q4, decoder_model_merged=q4)
+  'onnx-community/Florence-2-base-ft': [
+    'config.json',
+    'tokenizer.json',
+    'tokenizer_config.json',
+    'preprocessor_config.json',
+    'generation_config.json',
+    'added_tokens.json',
+    'special_tokens_map.json',
+    'vocab.json',
+    'merges.txt',
+    'onnx/embed_tokens_fp16.onnx',
+    'onnx/vision_encoder_fp16.onnx',
+    'onnx/encoder_model_q4.onnx',
+    'onnx/decoder_model_merged_q4.onnx',
+  ],
+  // Florence-2-base
+  'onnx-community/Florence-2-base': [
+    'config.json',
+    'tokenizer.json',
+    'tokenizer_config.json',
+    'preprocessor_config.json',
+    'generation_config.json',
+    'added_tokens.json',
+    'special_tokens_map.json',
+    'vocab.json',
+    'merges.txt',
+    'onnx/embed_tokens_fp16.onnx',
+    'onnx/vision_encoder_fp16.onnx',
+    'onnx/encoder_model_q4.onnx',
+    'onnx/decoder_model_merged_q4.onnx',
+  ],
 };
 
 async function downloadFile(url, destPath, maxRedirects = 5) {
