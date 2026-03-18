@@ -2301,9 +2301,56 @@ self.onmessage = async (e) => {
       const textInputs = tokenizer(prompts, { text_pair: textInputForTask || null, padding:false, truncation:true });
       const generatedIds = await model.generate({ ...visionInputs, ...textInputs, max_new_tokens:1024, num_beams:3, do_sample:false });
       const generatedText = tokenizer.batch_decode(generatedIds, { skip_special_tokens:false })[0];
-      const parsed = processor.post_process_generation(generatedText, taskTag, { width, height });
+      const parsed = processor.post_process_generation(generatedText, taskTag, [width, height]);
       const genTime = Math.round(performance.now() - t0);
-      self.postMessage({ type:'FLOR_RESULT', task, parsed, rawText:generatedText, genTime, imageW:width, imageH:height });
+      // Manually extract results — post_process_generation returns objects with
+      // Tensor-like bboxes that don't survive postMessage. Stringify + parse to force plain values.
+      const taskKey = '<' + task + '>';
+      const rawResult = parsed[taskKey] || parsed[''] || parsed;
+
+      // Force all values to primitives by stringifying each bbox individually
+      const safeResult = {};
+      if (rawResult) {
+        if (rawResult.labels) safeResult.labels = rawResult.labels.map(String);
+        if (rawResult.bboxes) {
+          safeResult.bboxes = rawResult.bboxes.map(bb => {
+            // bb might be a Float32Array, Tensor, or array-like object
+            if (bb && bb.tolist) return bb.tolist();           // Tensor.tolist()
+            if (bb && bb.data) return Array.from(bb.data);     // TypedArray wrapper
+            if (ArrayBuffer.isView(bb)) return Array.from(bb); // TypedArray
+            if (Array.isArray(bb)) return bb.map(Number);      // Regular array
+            // Try indexing directly
+            if (bb && typeof bb === 'object' && bb.length >= 4) {
+              return [Number(bb[0]), Number(bb[1]), Number(bb[2]), Number(bb[3])];
+            }
+            return bb;
+          });
+          // No debug needed — bboxes working
+        }
+        if (rawResult.polygons) {
+          safeResult.polygons = rawResult.polygons.map(pg =>
+            pg.map(poly => {
+              if (poly && poly.tolist) return poly.tolist();
+              if (ArrayBuffer.isView(poly)) return Array.from(poly);
+              if (Array.isArray(poly)) return poly.map(Number);
+              return poly;
+            })
+          );
+        }
+        if (rawResult.quad_boxes) {
+          safeResult.quad_boxes = rawResult.quad_boxes.map(q => {
+            if (q && q.tolist) return q.tolist();
+            if (ArrayBuffer.isView(q)) return Array.from(q);
+            return Array.isArray(q) ? q.map(Number) : q;
+          });
+        }
+        // Copy any remaining string fields
+        for (const k of Object.keys(rawResult)) {
+          if (!(k in safeResult)) safeResult[k] = rawResult[k];
+        }
+      }
+      const serialized = { [taskKey]: safeResult };
+      self.postMessage({ type:'FLOR_RESULT', task, parsed: serialized, rawText:generatedText, genTime, imageW:width, imageH:height });
     }
   } catch(err) {
     const isMemory = /memory|alloc|oom/i.test(err.message);
@@ -2371,7 +2418,12 @@ function renderFlorenceResult(msg) {
   const ctx=canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height);
   const showLabels=$('florShowLabels')?.checked!==false, fillPolygons=$('florFillPolygons')?.checked!==false;
   const opacity=parseInt($('florOpacity')?.value||80);
-  const taskTag='<'+task+'>'; const result=parsed[taskTag];
+  const taskTag='<'+task+'>';
+  // Result may be under taskTag key, empty string key, or the parsed object itself
+  const result = parsed[taskTag] || parsed[''] || parsed;
+
+  // Debug removed — rendering working
+
   // Text output tasks
   if (FLOR_TEXT_OUTPUT_TASKS.has(task)) {
     const el=$('florenceTextResult'); el.style.display='block';
@@ -2384,7 +2436,13 @@ function renderFlorenceResult(msg) {
     const bboxes=result.bboxes, labels=result.labels||bboxes.map((_,i)=>'region '+(i+1));
     ctx.font='bold 12px system-ui,sans-serif'; ctx.textBaseline='top';
     bboxes.forEach((box,i)=>{
-      const [x1,y1,x2,y2]=box, w=x2-x1, h=y2-y1, hue=(i*47+30)%360, color='hsl('+hue+',75%,55%)';
+      // Handle both array [x1,y1,x2,y2] and object {x1,y1,x2,y2} formats
+      let x1,y1,x2,y2;
+      if (Array.isArray(box)) { [x1,y1,x2,y2] = box; }
+      else if (box && typeof box === 'object') { x1=box.x1||box.x||0; y1=box.y1||box.y||0; x2=box.x2||(box.x+box.w)||0; y2=box.y2||(box.y+box.h)||0; }
+      else { return; }
+      if (x1==null || y1==null || x2==null || y2==null) return;
+      const w=x2-x1, h=y2-y1, hue=(i*47+30)%360, color='hsl('+hue+',75%,55%)';
       ctx.strokeStyle=color; ctx.lineWidth=2; ctx.strokeRect(x1,y1,w,h);
       ctx.fillStyle='hsla('+hue+',75%,55%,0.08)'; ctx.fillRect(x1,y1,w,h);
       if (showLabels && labels[i]) {
