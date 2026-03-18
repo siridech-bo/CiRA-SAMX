@@ -67,6 +67,17 @@
   .tab-btn.tab-active {
     background: var(--accent); color: #fff; border-color: var(--accent);
   }
+  #florenceCanvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+  #florenceTextResult {
+    margin-top: 10px; width: 100%; max-width: 900px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    font-size: 13px; line-height: 1.7; color: var(--text); display: none;
+    white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto;
+  }
+  .task-chip { display:inline-block; padding:2px 7px; border-radius:4px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-left:4px; }
+  .chip-text { background:rgba(99,102,241,0.2); color:#818cf8; }
+  .chip-box  { background:rgba(234,179,8,0.2); color:#fbbf24; }
+  .chip-auto { background:rgba(34,197,94,0.2); color:#4ade80; }
 
   .section {
     padding: 12px 16px;
@@ -334,6 +345,7 @@
     <div style="margin-left:auto;display:flex;gap:4px">
       <button id="tabSam" class="tab-btn tab-active" onclick="switchTab('sam')">SAM</button>
       <button id="tabYolo" class="tab-btn" onclick="switchTab('yolo')">YOLO26</button>
+      <button id="tabFlorence" class="tab-btn" onclick="switchTab('florence')">Florence-2</button>
     </div>
   </div>
 
@@ -496,6 +508,89 @@
     </div>
   </div>
 
+  <!-- ==================== FLORENCE-2 PANEL ==================== -->
+  <div id="florencePanel" style="display:none;flex-direction:column;flex:1">
+    <div class="section">
+      <div class="section-title">Florence-2 Model</div>
+      <select id="florModelSelect" class="model-select" onchange="onFlorModelChange()">
+        <option value="base-ft" selected>Florence-2-base-ft — 230M · ~900MB</option>
+        <option value="base">Florence-2-base — 230M · ~900MB · Base pretrained</option>
+        <option value="large-ft">Florence-2-large-ft — 770M · ~3GB · Best quality</option>
+        <option value="large">Florence-2-large — 770M · ~3GB · Large pretrained</option>
+      </select>
+      <div id="florModelDesc" class="model-desc">Microsoft Florence-2 · MIT license · Transformers.js · WebGPU/WASM</div>
+    </div>
+    <div class="section">
+      <div class="section-title">Status</div>
+      <div class="status-row"><div id="florStatusDot" class="status-dot"></div><span id="florStatusText" class="status-text">Not loaded</span></div>
+      <div id="florStatusSub" class="status-sub">Select a task and click Load</div>
+      <div id="florProgressWrap" class="progress-wrap"><div id="florProgressBar" class="progress-bar"></div></div>
+      <div id="florProgressMsg" class="progress-msg"></div>
+      <button id="florLoadBtn" class="btn" style="margin-top:8px" onclick="loadFlorenceModel()">Load Florence-2</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Task</div>
+      <select id="florTaskSelect" class="model-select" onchange="onFlorTaskChange()">
+        <optgroup label="Caption (auto)">
+          <option value="CAPTION">Brief Caption</option>
+          <option value="DETAILED_CAPTION">Detailed Caption</option>
+          <option value="MORE_DETAILED_CAPTION">Full Detailed Caption</option>
+        </optgroup>
+        <optgroup label="Detection (auto)">
+          <option value="OD" selected>Object Detection</option>
+          <option value="DENSE_REGION_CAPTION">Dense Region Caption</option>
+          <option value="REGION_PROPOSAL">Region Proposals</option>
+        </optgroup>
+        <optgroup label="Text-grounded (type query)">
+          <option value="CAPTION_TO_PHRASE_GROUNDING">Phrase Grounding</option>
+          <option value="REFERRING_EXPRESSION_SEGMENTATION">Referring Seg (polygon)</option>
+          <option value="OPEN_VOCABULARY_DETECTION">Open Vocabulary Detection</option>
+        </optgroup>
+        <optgroup label="Box-grounded (draw box first)">
+          <option value="REGION_TO_SEGMENTATION">Region → Segmentation</option>
+          <option value="REGION_TO_CATEGORY">Region → Category</option>
+          <option value="REGION_TO_DESCRIPTION">Region → Description</option>
+        </optgroup>
+        <optgroup label="OCR">
+          <option value="OCR">OCR — extract text</option>
+          <option value="OCR_WITH_REGION">OCR with Region</option>
+        </optgroup>
+      </select>
+      <div id="florTaskDesc" class="model-desc">Detects all objects with bounding boxes and class labels.</div>
+    </div>
+    <div class="section" id="florTextSection" style="display:none">
+      <div class="section-title">Text Input <span class="task-chip chip-text">REQUIRED</span></div>
+      <textarea id="florTextInput" class="prompt-input" rows="2" placeholder="e.g. 'person in orange helmet'" oninput="updateFlorRunBtn()"></textarea>
+    </div>
+    <div class="section" id="florBoxSection" style="display:none">
+      <div class="section-title">Canvas Region <span class="task-chip chip-box">DRAW BOX</span></div>
+      <div style="font-size:11px;color:var(--text2)">Draw a box on the image (SAM tab → Box mode) first.</div>
+      <div id="florBoxStatus" style="font-size:11px;margin-top:6px;color:var(--yellow)">No box drawn yet</div>
+    </div>
+    <div class="section">
+      <button id="florRunBtn" class="btn btn-segment" onclick="runFlorence()" disabled>▶ Run Florence-2</button>
+      <button class="btn btn-sm" style="margin-top:6px;width:100%" onclick="clearFlorenceCanvas()">Clear Results</button>
+      <div id="florRunHint" style="font-size:11px;color:var(--text2);margin-top:6px;text-align:center">Load model and upload image first</div>
+    </div>
+    <div class="section" id="florRenderSection">
+      <div class="section-title">Display Options</div>
+      <label style="font-size:12px;display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="florShowLabels" checked onchange="reRenderFlorence()"> Show labels</label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px"><input type="checkbox" id="florFillPolygons" checked onchange="reRenderFlorence()"> Fill polygon masks</label>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Opacity: <input type="range" id="florOpacity" min="20" max="180" value="80" step="10" oninput="reRenderFlorence()" style="width:100%;accent-color:var(--accent)"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Performance</div>
+      <div class="perf-row"><span class="perf-label">Backend</span><span id="florPerfBackend" class="perf-value">—</span></div>
+      <div class="perf-row"><span class="perf-label">Generate Time</span><span id="florPerfGen" class="perf-value">—</span></div>
+      <div class="perf-row"><span class="perf-label">Task</span><span id="florPerfTask" class="perf-value" style="font-size:10px">—</span></div>
+      <div class="perf-row"><span class="perf-label">Results</span><span id="florPerfCount" class="perf-value">—</span></div>
+    </div>
+    <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="section-title">Log</div>
+      <div id="florLogPanel" class="log-panel"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- MAIN AREA -->
@@ -512,11 +607,13 @@
       <canvas id="imageCanvas"></canvas>
       <canvas id="maskCanvas"></canvas>
       <canvas id="yoloCanvas" style="position:absolute;top:0;left:0;pointer-events:none"></canvas>
+      <canvas id="florenceCanvas"></canvas>
       <div id="boxOverlay"></div>
       <button class="change-img-btn" onclick="changeImage()">Change Image</button>
     </div>
     <div id="infoBar"></div>
   </div>
+  <div id="florenceTextResult"></div>
 </div>
 
 <script>
@@ -1150,6 +1247,8 @@ function handleFile(file) {
       maskCanvas.height = h;
       const yc = $('yoloCanvas');
       if (yc) { yc.width = w; yc.height = h; }
+      const fc = $('florenceCanvas');
+      if (fc) { fc.width = w; fc.height = h; fc.style.display = currentTab === 'florence' ? 'block' : 'none'; }
 
       const ctx = imageCanvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
@@ -1168,6 +1267,8 @@ function handleFile(file) {
       log(`Image loaded: ${w}x${h}`, 'ok');
       updateInfoBar();
       updateYoloRunBtn();
+      updateFlorRunBtn();
+      if (currentTab === 'florence') updateFlorBoxStatus();
 
       if (modelLoaded) {
         encodeImage();
@@ -1601,15 +1702,16 @@ const KPT_COLORS = ['#ff6b6b','#ff6b6b','#ff6b6b','#ff6b6b','#ff6b6b','#4ecdc4',
 // ==================== YOLO26 TAB / UI ====================
 function switchTab(tab) {
   currentTab = tab;
+  document.querySelectorAll('#sidebar > .section').forEach(s => { s.style.display = tab === 'sam' ? '' : 'none'; });
   $('yoloPanel').style.display = tab === 'yolo' ? 'flex' : 'none';
-  document.querySelectorAll('#sidebar > .section').forEach(s => {
-    s.style.display = tab === 'sam' ? '' : 'none';
-  });
-  // Also hide/show model info section
-  const mi = $('modelInfoSection');
-  if (mi) mi.style.display = (tab === 'sam' && mi.dataset.wasVisible === '1') ? '' : 'none';
+  $('florencePanel').style.display = tab === 'florence' ? 'flex' : 'none';
   $('tabSam').className = 'tab-btn' + (tab === 'sam' ? ' tab-active' : '');
   $('tabYolo').className = 'tab-btn' + (tab === 'yolo' ? ' tab-active' : '');
+  $('tabFlorence').className = 'tab-btn' + (tab === 'florence' ? ' tab-active' : '');
+  const fc = $('florenceCanvas');
+  if (fc) fc.style.display = tab === 'florence' ? 'block' : 'none';
+  $('florenceTextResult').style.display = 'none';
+  if (tab === 'florence') updateFlorBoxStatus();
 }
 
 function onYoloModelChange() {
@@ -1763,28 +1865,129 @@ self.onmessage = async (e) => {
           });
         }
       } else if (TASK === 'pose') {
-        const out = results[session.outputNames[0]]; const data = out.data; const stride = out.dims[2];
-        for (let i = 0; i < out.dims[1]; i++) {
-          const b = i * stride, score = data[b+4];
-          if (score < conf) continue;
-          const keypoints = [];
-          for (let k = 0; k < 17; k++) { const kb = b+6+k*3; keypoints.push({ x:data[kb]*scaleX, y:data[kb+1]*scaleY, v:data[kb+2] }); }
-          detections.push({ x1:data[b]*scaleX, y1:data[b+1]*scaleY, x2:data[b+2]*scaleX, y2:data[b+3]*scaleY, score, classId:0, keypoints });
+        // Pose model may output: logits=[1,300,1] + pred_boxes=[1,300,4] + pred_keypoints=[1,300,51]
+        // Or combined: [1,300,57] = [x1,y1,x2,y2,score,cls,17*3]
+        const outNames = session.outputNames;
+        self.postMessage({ type: 'YOLO_DEBUG', message: 'Pose outputs: ' + outNames.map(n => n + '=' + JSON.stringify(Array.from(results[n].dims))).join(', ') });
+
+        if (outNames.includes('pred_boxes') && outNames.includes('pred_keypoints')) {
+          // Separate outputs format
+          const logitsOut = results['logits'] || results[outNames[0]];
+          const boxesOut = results['pred_boxes'];
+          const kptsOut = results['pred_keypoints'];
+          const logits = logitsOut.data, boxes = boxesOut.data, kpts = kptsOut.data;
+          const numDet = logitsOut.dims[1];
+          const numKptVals = kptsOut.dims[2]; // 51 = 17*3
+
+          for (let i = 0; i < numDet; i++) {
+            const score = 1 / (1 + Math.exp(-logits[i])); // single class (person)
+            if (score < conf) continue;
+            const cx = boxes[i*4] * width, cy = boxes[i*4+1] * height;
+            const bw = boxes[i*4+2] * width, bh = boxes[i*4+3] * height;
+            const keypoints = [];
+            for (let k = 0; k < 17; k++) {
+              const ki = i * numKptVals + k * 3;
+              keypoints.push({ x: kpts[ki] * width, y: kpts[ki+1] * height, v: kpts[ki+2] });
+            }
+            detections.push({ x1: cx-bw/2, y1: cy-bh/2, x2: cx+bw/2, y2: cy+bh/2, score, classId: 0, keypoints });
+          }
+        } else {
+          // Combined format: [1,300,57]
+          // Could be [cx,cy,w,h,score,cls,17*(kx,ky,kv)] with values normalized or in 640-space
+          const out = results[outNames[0]]; const data = out.data; const stride = out.dims[2];
+
+          // Check if first box values are normalized (0-1) or 640-space
+          const isNorm = Math.abs(data[0]) <= 1.5 && Math.abs(data[1]) <= 1.5;
+          // Show first 20 values and specifically the keypoint triplets
+          const row0 = Array.from(data.slice(0, stride)).map(v => v.toFixed(3));
+          self.postMessage({ type: 'YOLO_DEBUG', message: 'Pose row[0]: box=' + row0.slice(0,4).join(',') + ' score=' + row0[4] + ' cls=' + row0[5] + ' kpt0=' + row0.slice(6,9).join(',') + ' kpt1=' + row0.slice(9,12).join(',') + ' kpt2=' + row0.slice(12,15).join(',') + ' | norm=' + isNorm });
+
+          for (let i = 0; i < out.dims[1]; i++) {
+            const b = i * stride;
+            const score = data[b+4];
+            if (score < conf) continue;
+
+            let x1, y1, x2, y2;
+            if (isNorm) {
+              // cx,cy,w,h normalized
+              const cx = data[b] * width, cy = data[b+1] * height;
+              const bw = data[b+2] * width, bh = data[b+3] * height;
+              x1 = cx - bw/2; y1 = cy - bh/2; x2 = cx + bw/2; y2 = cy + bh/2;
+            } else {
+              x1 = data[b]*scaleX; y1 = data[b+1]*scaleY;
+              x2 = data[b+2]*scaleX; y2 = data[b+3]*scaleY;
+            }
+
+            const keypoints = [];
+            for (let k = 0; k < 17; k++) {
+              const kb = b + 6 + k * 3;
+              // Keypoints: if normalized, scale by image size; else by scale factor
+              const kx = isNorm ? data[kb] * width : data[kb] * scaleX;
+              const ky = isNorm ? data[kb+1] * height : data[kb+1] * scaleY;
+              keypoints.push({ x: kx, y: ky, v: data[kb+2] });
+            }
+            detections.push({ x1, y1, x2, y2, score, classId: 0, keypoints });
+          }
         }
       } else if (TASK === 'seg') {
+        // output0=[1,300,38]: could be [x1,y1,x2,y2,score,class,32_coeffs] or [80_logits,...] format
+        // output1=[1,32,160,160]: proto masks
         const out0 = results[session.outputNames[0]], out1 = results[session.outputNames[1]];
         const det = out0.data, proto = out1.data;
-        const PROTO_H = 160, PROTO_W = 160;
+        const stride = out0.dims[2]; // 38
+        const PROTO_H = out1.dims[2], PROTO_W = out1.dims[3];
+        const numMaskCoeffs = out1.dims[1]; // 32
+
+        // Debug: check first detection's data range
+        self.postMessage({ type: 'YOLO_DEBUG', message: 'Seg stride=' + stride + ' proto=' + PROTO_H + 'x' + PROTO_W + 'x' + numMaskCoeffs + ' | first row sample: ' + Array.from(det.slice(0, Math.min(stride, 10))).map(v => v.toFixed(2)).join(', ') });
+
+        // Detect format: stride=38 → [x1,y1,x2,y2,score,class,32_coeffs]
+        // But if values[0..3] are all < 1, they're normalized cx,cy,w,h
+        const firstBox = [det[0], det[1], det[2], det[3]];
+        const isNormalized = firstBox.every(v => Math.abs(v) <= 1.5);
+
         for (let i = 0; i < out0.dims[1]; i++) {
-          const b = i * 38, score = det[b+4];
+          const b = i * stride;
+          const score = det[b+4];
           if (score < conf) continue;
           const classId = Math.round(det[b+5]);
-          const coeffs = det.slice(b+6, b+38);
+
+          // Parse box coordinates
+          let x1, y1, x2, y2;
+          if (isNormalized) {
+            // cx,cy,w,h normalized format
+            const cx = det[b] * width, cy = det[b+1] * height;
+            const bw = det[b+2] * width, bh = det[b+3] * height;
+            x1 = cx - bw/2; y1 = cy - bh/2; x2 = cx + bw/2; y2 = cy + bh/2;
+          } else {
+            // x1,y1,x2,y2 in 640-space
+            x1 = det[b] * scaleX; y1 = det[b+1] * scaleY;
+            x2 = det[b+2] * scaleX; y2 = det[b+3] * scaleY;
+          }
+
+          // Decode mask coefficients → proto mask
+          const coeffs = det.slice(b + (stride - numMaskCoeffs), b + stride);
           const maskLogits = new Float32Array(PROTO_H * PROTO_W);
-          for (let p = 0; p < PROTO_H * PROTO_W; p++) { let v = 0; for (let c = 0; c < 32; c++) v += coeffs[c] * proto[c*PROTO_H*PROTO_W+p]; maskLogits[p] = v; }
+          for (let p = 0; p < PROTO_H * PROTO_W; p++) {
+            let v = 0;
+            for (let c = 0; c < numMaskCoeffs; c++) v += coeffs[c] * proto[c * PROTO_H * PROTO_W + p];
+            maskLogits[p] = v;
+          }
+
+          // Crop mask to bounding box area only (in proto space)
           const mask160 = new Uint8Array(PROTO_H * PROTO_W);
-          for (let p = 0; p < maskLogits.length; p++) mask160[p] = sigmoid(maskLogits[p]) > 0.5 ? 1 : 0;
-          detections.push({ x1:det[b]*scaleX, y1:det[b+1]*scaleY, x2:det[b+2]*scaleX, y2:det[b+3]*scaleY, score, classId, mask160:Array.from(mask160), maskW:PROTO_W, maskH:PROTO_H, maskScaleX:width/PROTO_W, maskScaleY:height/PROTO_H });
+          const bx1 = Math.max(0, Math.floor(x1 / width * PROTO_W));
+          const by1 = Math.max(0, Math.floor(y1 / height * PROTO_H));
+          const bx2 = Math.min(PROTO_W, Math.ceil(x2 / width * PROTO_W));
+          const by2 = Math.min(PROTO_H, Math.ceil(y2 / height * PROTO_H));
+          for (let py = by1; py < by2; py++) {
+            for (let px = bx1; px < bx2; px++) {
+              const idx = py * PROTO_W + px;
+              mask160[idx] = sigmoid(maskLogits[idx]) > 0.5 ? 1 : 0;
+            }
+          }
+
+          detections.push({ x1, y1, x2, y2, score, classId, mask160: Array.from(mask160), maskW: PROTO_W, maskH: PROTO_H, maskScaleX: width/PROTO_W, maskScaleY: height/PROTO_H });
         }
       }
       self.postMessage({ type: 'YOLO_RESULT', detections, task: TASK, preTime: tPre, infTime: tInf, imageW: width, imageH: height });
@@ -1900,12 +2103,12 @@ function renderPose(ctx, detections) {
     if (!d.keypoints) continue;
     const kpts = d.keypoints;
     for (const [a, b] of POSE_SKELETON) {
-      if (kpts[a].v < 0.3 || kpts[b].v < 0.3) continue;
+      if (kpts[a].v < 0.01 || kpts[b].v < 0.01) continue;
       ctx.beginPath(); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
       ctx.moveTo(kpts[a].x, kpts[a].y); ctx.lineTo(kpts[b].x, kpts[b].y); ctx.stroke();
     }
     for (let k = 0; k < kpts.length; k++) {
-      if (kpts[k].v < 0.3) continue;
+      if (kpts[k].v < 0.01) continue;
       ctx.beginPath(); ctx.arc(kpts[k].x, kpts[k].y, 4, 0, Math.PI * 2);
       ctx.fillStyle = KPT_COLORS[k] || '#fff'; ctx.fill();
       ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
@@ -1976,6 +2179,260 @@ function hslToRgb(h, s, l) {
   return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
 }
 
+// ==================== FLORENCE-2 STATE ====================
+let florWorker = null, florModelLoaded = false, florIsLoading = false, florIsRunning = false;
+let florSelectedModel = 'base-ft', florSelectedTask = 'OD', florLastResult = null;
+const FLOR_MODEL_IDS = { 'base-ft':'onnx-community/Florence-2-base-ft', 'base':'onnx-community/Florence-2-base', 'large-ft':'onnx-community/Florence-2-large-ft', 'large':'onnx-community/Florence-2-large' };
+const FLOR_TEXT_TASKS = new Set(['CAPTION_TO_PHRASE_GROUNDING','REFERRING_EXPRESSION_SEGMENTATION','OPEN_VOCABULARY_DETECTION']);
+const FLOR_BOX_TASKS = new Set(['REGION_TO_SEGMENTATION','REGION_TO_CATEGORY','REGION_TO_DESCRIPTION']);
+const FLOR_TEXT_OUTPUT_TASKS = new Set(['CAPTION','DETAILED_CAPTION','MORE_DETAILED_CAPTION','OCR','REGION_TO_CATEGORY','REGION_TO_DESCRIPTION']);
+const FLOR_TASK_DESCS = { CAPTION:'Brief one-sentence description.', DETAILED_CAPTION:'Detailed image description.', MORE_DETAILED_CAPTION:'Most comprehensive description.', OD:'All objects with bounding boxes and labels.', DENSE_REGION_CAPTION:'Caption every salient region.', REGION_PROPOSAL:'Candidate object regions (unlabeled).', CAPTION_TO_PHRASE_GROUNDING:'Type a sentence → locates each noun phrase.', REFERRING_EXPRESSION_SEGMENTATION:'Type object name → polygon mask.', OPEN_VOCABULARY_DETECTION:'Type any class → finds instances.', REGION_TO_SEGMENTATION:'Draw box → segmentation polygon.', REGION_TO_CATEGORY:'Draw box → category label.', REGION_TO_DESCRIPTION:'Draw box → text description.', OCR:'Extract all text from image.', OCR_WITH_REGION:'Text + bounding boxes.' };
+
+// roundRect polyfill
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r) {
+    this.beginPath(); this.moveTo(x+r,y); this.lineTo(x+w-r,y); this.arcTo(x+w,y,x+w,y+r,r);
+    this.lineTo(x+w,y+h-r); this.arcTo(x+w,y+h,x+w-r,y+h,r); this.lineTo(x+r,y+h);
+    this.arcTo(x,y+h,x,y+h-r,r); this.lineTo(x,y+r); this.arcTo(x,y,x+r,y,r); this.closePath();
+  };
+}
+
+// ==================== FLORENCE-2 UI ====================
+function onFlorModelChange() {
+  florSelectedModel = $('florModelSelect').value;
+  if (florModelLoaded || florIsLoading) {
+    florModelLoaded = false; florIsLoading = false;
+    if (florWorker) { florWorker.terminate(); florWorker = null; }
+    setFlorStatus('idle', 'Not loaded', 'Model changed — click Load');
+    $('florLoadBtn').disabled = false;
+  }
+  updateFlorRunBtn();
+}
+function onFlorTaskChange() {
+  florSelectedTask = $('florTaskSelect').value;
+  $('florTaskDesc').textContent = FLOR_TASK_DESCS[florSelectedTask] || '';
+  $('florTextSection').style.display = FLOR_TEXT_TASKS.has(florSelectedTask) ? '' : 'none';
+  $('florBoxSection').style.display = FLOR_BOX_TASKS.has(florSelectedTask) ? '' : 'none';
+  updateFlorBoxStatus();
+  updateFlorRunBtn();
+}
+function updateFlorBoxStatus() {
+  const el = $('florBoxStatus'); if (!el) return;
+  if (currentBox) { el.style.color = 'var(--green)'; el.textContent = 'Box: (' + currentBox.x1 + ',' + currentBox.y1 + ') → (' + currentBox.x2 + ',' + currentBox.y2 + ')'; }
+  else { el.style.color = 'var(--yellow)'; el.textContent = 'No box drawn — use SAM tab → Box mode'; }
+}
+function setFlorStatus(state, text, sub) {
+  $('florStatusDot').className = 'status-dot' + (state==='loading'?' loading':state==='ready'?' ready':state==='error'?' error':'');
+  $('florStatusText').textContent = text; if (sub !== undefined) $('florStatusSub').textContent = sub;
+}
+function updateFlorRunBtn() {
+  const btn = $('florRunBtn'), hint = $('florRunHint');
+  if (!florModelLoaded) { btn.disabled=true; hint.textContent='Load Florence-2 first'; return; }
+  if (!currentImageEl) { btn.disabled=true; hint.textContent='Upload an image first'; return; }
+  if (florIsRunning) { btn.disabled=true; btn.textContent='⏳ Generating...'; return; }
+  if (FLOR_TEXT_TASKS.has(florSelectedTask) && !($('florTextInput')?.value.trim())) { btn.disabled=true; hint.textContent='Enter text input above'; return; }
+  if (FLOR_BOX_TASKS.has(florSelectedTask) && !currentBox) { btn.disabled=true; hint.textContent='Draw a box first (SAM tab → Box mode)'; return; }
+  btn.disabled=false; btn.textContent='▶ Run Florence-2'; hint.textContent='Task: <'+florSelectedTask+'>';
+}
+function florLog(msg, type='info') {
+  const ts = [new Date().getHours(),new Date().getMinutes(),new Date().getSeconds()].map(n=>String(n).padStart(2,'0')).join(':');
+  const cls = {info:'log-info',ok:'log-ok',warn:'log-warn',err:'log-err'}[type]||'log-info';
+  const line = document.createElement('div'); line.className='log-line';
+  line.innerHTML='<span class="log-ts">['+ts+']</span> <span class="'+cls+'">'+msg+'</span>';
+  $('florLogPanel').appendChild(line); $('florLogPanel').scrollTop=$('florLogPanel').scrollHeight;
+}
+function clearFlorenceCanvas() {
+  const c=$('florenceCanvas'); if(c) c.getContext('2d').clearRect(0,0,c.width,c.height);
+  $('florenceTextResult').style.display='none'; florLastResult=null; $('florPerfCount').textContent='—';
+}
+function reRenderFlorence() { if (florLastResult) renderFlorenceResult(florLastResult); }
+
+// ==================== FLORENCE-2 WORKER ====================
+function createFlorenceWorker() {
+  const modelId = FLOR_MODEL_IDS[florSelectedModel];
+  const isLarge = florSelectedModel.startsWith('large');
+  const workerCode = `
+import { Florence2ForConditionalGeneration, AutoProcessor, AutoTokenizer, RawImage, env }
+  from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+env.allowLocalModels = false; env.allowRemoteModels = true; env.useBrowserCache = true;
+const MODEL_ID = '${modelId}';
+let model = null, processor = null, tokenizer = null;
+function onProgress(p) {
+  if (p.status === 'progress' && p.progress !== undefined)
+    self.postMessage({ type:'FLOR_PROGRESS', progress:Math.round(p.progress), message: p.file ? ('Loading '+p.file+'...') : 'Loading...' });
+  else if (p.status === 'initiate')
+    self.postMessage({ type:'FLOR_PROGRESS', progress:0, message: p.file ? ('Starting '+p.file+'...') : 'Starting...' });
+}
+self.onmessage = async (e) => {
+  const msg = e.data;
+  try {
+    if (msg.type === 'FLOR_LOAD') {
+      const device = msg.device || 'wasm';
+      self.postMessage({ type:'FLOR_PROGRESS', progress:0, message:'Loading '+MODEL_ID+'...' });
+      const dtype = { embed_tokens:'fp16', vision_encoder:'fp16', encoder_model:'q4', decoder_model_merged:'q4' };
+      const t0 = performance.now();
+      model = await Florence2ForConditionalGeneration.from_pretrained(MODEL_ID, { dtype, device, progress_callback: onProgress });
+      processor = await AutoProcessor.from_pretrained(MODEL_ID);
+      tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
+      const loadTime = Math.round(performance.now() - t0);
+      self.postMessage({ type:'FLOR_LOADED', loadTime, modelId:MODEL_ID, device });
+    } else if (msg.type === 'FLOR_RUN') {
+      const { rgbaData, width, height, task, textInput, boxInput } = msg;
+      const t0 = performance.now();
+      const rawImage = new RawImage(new Uint8ClampedArray(rgbaData), width, height, 4);
+      const taskTag = '<' + task + '>';
+      let textInputForTask = undefined;
+      if (textInput) textInputForTask = textInput;
+      else if (boxInput) {
+        const x1n=Math.round((boxInput.x1/width)*999), y1n=Math.round((boxInput.y1/height)*999);
+        const x2n=Math.round((boxInput.x2/width)*999), y2n=Math.round((boxInput.y2/height)*999);
+        textInputForTask = '<loc_'+x1n+'><loc_'+y1n+'><loc_'+x2n+'><loc_'+y2n+'>';
+      }
+      const prompts = processor.construct_prompts(taskTag);
+      const visionInputs = await processor(rawImage);
+      const textInputs = tokenizer(prompts, { text_pair: textInputForTask || null, padding:false, truncation:true });
+      const generatedIds = await model.generate({ ...visionInputs, ...textInputs, max_new_tokens:1024, num_beams:3, do_sample:false });
+      const generatedText = tokenizer.batch_decode(generatedIds, { skip_special_tokens:false })[0];
+      const parsed = processor.post_process_generation(generatedText, taskTag, { width, height });
+      const genTime = Math.round(performance.now() - t0);
+      self.postMessage({ type:'FLOR_RESULT', task, parsed, rawText:generatedText, genTime, imageW:width, imageH:height });
+    }
+  } catch(err) {
+    const isMemory = /memory|alloc|oom/i.test(err.message);
+    self.postMessage({ type:'FLOR_ERROR', message: isMemory ? 'Memory error — try base-ft model or enable WebGPU' : (err.message || String(err)) });
+  }
+};
+`;
+  const blob = new Blob([workerCode], { type:'application/javascript' });
+  florWorker = new Worker(URL.createObjectURL(blob), { type:'module' });
+  florWorker.onmessage = (e) => {
+    const msg = e.data;
+    switch(msg.type) {
+      case 'FLOR_PROGRESS':
+        $('florProgressWrap').style.display='block'; $('florProgressBar').style.width=msg.progress+'%';
+        $('florProgressMsg').textContent=msg.message||''; setFlorStatus('loading','Loading... '+msg.progress+'%',msg.message); break;
+      case 'FLOR_LOADED':
+        florModelLoaded=true; florIsLoading=false; $('florProgressWrap').style.display='none'; $('florProgressMsg').textContent='';
+        $('florLoadBtn').disabled=true; $('florModelSelect').disabled=false;
+        setFlorStatus('ready','Model ready',msg.modelId+' in '+(msg.loadTime/1000).toFixed(1)+'s');
+        $('florPerfBackend').textContent=(msg.device||'wasm').toUpperCase();
+        $('florPerfBackend').className='perf-value '+(msg.device==='webgpu'?'perf-green':'perf-yellow');
+        florLog('Florence-2 ready · '+msg.modelId+' · '+(msg.loadTime/1000).toFixed(1)+'s','ok'); updateFlorRunBtn(); break;
+      case 'FLOR_RESULT':
+        florIsRunning=false; florLastResult=msg; renderFlorenceResult(msg);
+        $('florPerfGen').textContent=msg.genTime+'ms';
+        $('florPerfGen').className='perf-value '+(msg.genTime<3000?'perf-green':msg.genTime<8000?'perf-yellow':'perf-red');
+        $('florPerfTask').textContent='<'+msg.task+'>'; florLog('Done in '+msg.genTime+'ms','ok'); updateFlorRunBtn(); break;
+      case 'FLOR_ERROR':
+        florIsRunning=false; florIsLoading=false; setFlorStatus('error','Error',msg.message);
+        florLog('Error: '+msg.message,'err'); $('florLoadBtn').disabled=florModelLoaded; $('florModelSelect').disabled=false; updateFlorRunBtn(); break;
+    }
+  };
+  florWorker.onerror = (e) => florLog('Worker error: '+e.message,'err');
+}
+
+// ==================== FLORENCE-2 LOAD/RUN ====================
+function loadFlorenceModel() {
+  if (florIsLoading || florModelLoaded) return;
+  florIsLoading = true; $('florLoadBtn').disabled=true; $('florModelSelect').disabled=true;
+  setFlorStatus('loading','Loading...','Starting worker...');
+  $('florProgressWrap').style.display='block'; $('florProgressBar').style.width='0%';
+  const mid = FLOR_MODEL_IDS[florSelectedModel];
+  florLog('Loading '+mid+'...' + (florSelectedModel.startsWith('large') ? ' (large model — may take 10-30s on WASM, recommend WebGPU)' : ''),'info');
+  if (florWorker) florWorker.terminate();
+  createFlorenceWorker();
+  florWorker.postMessage({ type:'FLOR_LOAD', device: selectedBackend });
+}
+function runFlorence() {
+  if (!florModelLoaded || !currentImageEl || florIsRunning) return;
+  florIsRunning = true; updateFlorRunBtn(); clearFlorenceCanvas();
+  const w=imageCanvas.width, h=imageCanvas.height;
+  const ctx=imageCanvas.getContext('2d'), imageData=ctx.getImageData(0,0,w,h);
+  const rgbaClone = imageData.data.buffer.slice(0);
+  const textInput = FLOR_TEXT_TASKS.has(florSelectedTask) ? ($('florTextInput')?.value.trim()||'') : '';
+  const boxInput = FLOR_BOX_TASKS.has(florSelectedTask) && currentBox ? {x1:currentBox.x1,y1:currentBox.y1,x2:currentBox.x2,y2:currentBox.y2} : null;
+  florLog('Running <'+florSelectedTask+'>'+(textInput?' "'+textInput+'"':'')+'...','info');
+  florWorker.postMessage({ type:'FLOR_RUN', rgbaData:rgbaClone, width:w, height:h, task:florSelectedTask, textInput:textInput||null, boxInput }, [rgbaClone]);
+}
+
+// ==================== FLORENCE-2 RENDERING ====================
+function renderFlorenceResult(msg) {
+  const { task, parsed, rawText, imageW, imageH } = msg;
+  const canvas=$('florenceCanvas'); canvas.width=imageCanvas.width; canvas.height=imageCanvas.height;
+  canvas.style.display='block';
+  const ctx=canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height);
+  const showLabels=$('florShowLabels')?.checked!==false, fillPolygons=$('florFillPolygons')?.checked!==false;
+  const opacity=parseInt($('florOpacity')?.value||80);
+  const taskTag='<'+task+'>'; const result=parsed[taskTag];
+  // Text output tasks
+  if (FLOR_TEXT_OUTPUT_TASKS.has(task)) {
+    const el=$('florenceTextResult'); el.style.display='block';
+    el.textContent = typeof result==='string' ? result : (rawText||JSON.stringify(result));
+    $('florPerfCount').textContent = (typeof result==='string' ? result.length+' chars' : '—');
+    florLog('Text: '+(typeof result==='string'?result.slice(0,120):'(see panel)'),'ok'); return;
+  }
+  // Bounding boxes
+  if (result && result.bboxes) {
+    const bboxes=result.bboxes, labels=result.labels||bboxes.map((_,i)=>'region '+(i+1));
+    ctx.font='bold 12px system-ui,sans-serif'; ctx.textBaseline='top';
+    bboxes.forEach((box,i)=>{
+      const [x1,y1,x2,y2]=box, w=x2-x1, h=y2-y1, hue=(i*47+30)%360, color='hsl('+hue+',75%,55%)';
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.strokeRect(x1,y1,w,h);
+      ctx.fillStyle='hsla('+hue+',75%,55%,0.08)'; ctx.fillRect(x1,y1,w,h);
+      if (showLabels && labels[i]) {
+        const label=String(labels[i]).slice(0,60), tw=ctx.measureText(label).width;
+        ctx.fillStyle=color; ctx.beginPath(); ctx.roundRect(x1-1,y1-22,tw+10,20,4); ctx.fill();
+        ctx.fillStyle='#000'; ctx.fillText(label,x1+4,y1-20);
+      }
+    });
+    $('florPerfCount').textContent=bboxes.length+' regions';
+    florLog('Rendered '+bboxes.length+' bounding boxes','ok');
+  }
+  // Polygons
+  else if (result && result.polygons) {
+    const polygons=result.polygons, labels=result.labels||polygons.map((_,i)=>'object '+(i+1));
+    let total=0;
+    polygons.forEach((polyGroup,i)=>{
+      const hue=(i*67+15)%360, color='hsl('+hue+',75%,55%)';
+      polyGroup.forEach(polygon=>{
+        if (polygon.length<4) return; total++;
+        ctx.beginPath(); ctx.moveTo(polygon[0],polygon[1]);
+        for(let p=2;p<polygon.length;p+=2) ctx.lineTo(polygon[p],polygon[p+1]);
+        ctx.closePath();
+        if (fillPolygons) { ctx.fillStyle='hsla('+hue+',75%,55%,'+(opacity/255)+')'; ctx.fill(); }
+        ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.stroke();
+        if (showLabels && labels[i]) {
+          const xs=polygon.filter((_,j)=>j%2===0), ys=polygon.filter((_,j)=>j%2===1);
+          const cx=xs.reduce((a,b)=>a+b,0)/xs.length, cy=ys.reduce((a,b)=>a+b,0)/ys.length;
+          ctx.font='bold 13px system-ui,sans-serif'; ctx.textBaseline='middle'; ctx.textAlign='center';
+          const label=String(labels[i]).slice(0,40), tw=ctx.measureText(label).width;
+          ctx.fillStyle='hsla('+hue+',75%,55%,0.85)'; ctx.beginPath(); ctx.roundRect(cx-tw/2-5,cy-11,tw+10,22,5); ctx.fill();
+          ctx.fillStyle='#000'; ctx.fillText(label,cx,cy); ctx.textAlign='left'; ctx.textBaseline='top';
+        }
+      });
+    });
+    $('florPerfCount').textContent=total+' polygon(s)'; florLog('Rendered '+total+' polygon(s)','ok');
+  }
+  // OCR quads
+  else if (result && result.quad_boxes) {
+    const quads=result.quad_boxes, labels=result.labels||[];
+    ctx.font='11px system-ui,sans-serif'; ctx.textBaseline='top';
+    quads.forEach((q,i)=>{
+      ctx.beginPath(); ctx.moveTo(q[0],q[1]); ctx.lineTo(q[2],q[3]); ctx.lineTo(q[4],q[5]); ctx.lineTo(q[6],q[7]); ctx.closePath();
+      ctx.strokeStyle='#6366f1'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.fillStyle='rgba(99,102,241,0.08)'; ctx.fill();
+      if (showLabels && labels[i]) { const l=String(labels[i]).slice(0,80), tw=ctx.measureText(l).width; ctx.fillStyle='rgba(99,102,241,0.85)'; ctx.fillRect(q[0],q[1]-18,tw+6,16); ctx.fillStyle='#fff'; ctx.fillText(l,q[0]+3,q[1]-17); }
+    });
+    $('florPerfCount').textContent=quads.length+' text region(s)'; florLog('Rendered '+quads.length+' OCR regions','ok');
+    if (labels.length>0) { const el=$('florenceTextResult'); el.style.display='block'; el.textContent=labels.join('\n'); }
+  }
+  // Fallback
+  else if (result !== undefined) {
+    const el=$('florenceTextResult'); el.style.display='block'; el.textContent=JSON.stringify(result,null,2);
+    $('florPerfCount').textContent='see text panel'; florLog('Unknown format — shown in text panel','warn');
+  }
+}
+
 // ===================== INIT =====================
 (async () => {
   log('SAM Browser Test initialized', 'ok');
@@ -1988,6 +2445,7 @@ function hslToRgb(h, s, l) {
   if (promptInput) {
     promptInput.addEventListener('input', () => updateSegmentBtn());
   }
+  onFlorTaskChange();
 })();
 </script>
 </body>
