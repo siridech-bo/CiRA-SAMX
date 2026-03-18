@@ -2554,11 +2554,35 @@ function renderFlorenceResult(msg) {
     $('florPerfCount').textContent=quads.length+' text region(s)'; florLog('Rendered '+quads.length+' OCR regions','ok');
     if (labels.length>0) { const el=$('florenceTextResult'); el.style.display='block'; el.textContent=labels.join('\n'); }
   }
+  // Try parsing raw loc tokens for polygon tasks (Transformers.js doesn't support this yet)
+  else if (result !== undefined && typeof result === 'string' && result.includes('<loc_')) {
+    const locPattern = /<loc_(\d+)>/g;
+    const values = []; let m;
+    while ((m = locPattern.exec(result)) !== null) values.push(parseInt(m[1]));
+    if (values.length >= 4) {
+      const coords = values.map((v, i) => i % 2 === 0 ? (v / 999) * imageW : (v / 999) * imageH);
+      ctx.beginPath(); ctx.moveTo(coords[0], coords[1]);
+      for (let i = 2; i < coords.length; i += 2) ctx.lineTo(coords[i], coords[i + 1]);
+      ctx.closePath();
+      if ($('florFillPolygons')?.checked !== false) {
+        ctx.fillStyle = 'hsla(270,75%,55%,' + (parseInt($('florOpacity')?.value || 80) / 255) + ')';
+        ctx.fill();
+      }
+      ctx.strokeStyle = 'hsl(270,75%,55%)'; ctx.lineWidth = 2.5; ctx.stroke();
+      $('florPerfCount').textContent = (coords.length / 2) + ' polygon points';
+      florLog('Parsed ' + (coords.length / 2) + ' polygon points from loc tokens', 'ok');
+    }
+    const el = $('florenceTextResult'); el.style.display = 'block'; el.textContent = result;
+  }
+
   // Fallback
   else if (result !== undefined) {
-    const el=$('florenceTextResult'); el.style.display='block'; el.textContent=JSON.stringify(result,null,2);
+    const el=$('florenceTextResult'); el.style.display='block'; el.textContent = typeof result === 'string' ? result : JSON.stringify(result,null,2);
     $('florPerfCount').textContent='see text panel'; florLog('Unknown format — shown in text panel','warn');
   }
+
+  // Redraw Florence box overlay if present
+  if (currentBox && FLOR_BOX_TASKS.has(task)) drawFlorenceBox();
 }
 
 // ===================== INIT =====================
