@@ -2353,7 +2353,8 @@ self.onmessage = async (e) => {
       // Using text_pair would insert separator tokens that corrupt Florence-2 input
       const fullPrompt = textInputForTask ? prompts + textInputForTask : prompts;
       const textInputs = tokenizer(fullPrompt, { padding:true, truncation:true });
-      const generatedIds = await model.generate({ ...visionInputs, ...textInputs, max_new_tokens:1024, num_beams:3, do_sample:false });
+      const MAX_TOKENS = { CAPTION:64, DETAILED_CAPTION:128, MORE_DETAILED_CAPTION:256, REGION_TO_CATEGORY:32, REGION_TO_DESCRIPTION:128, REGION_PROPOSAL:256, OD:512, DENSE_REGION_CAPTION:512, CAPTION_TO_PHRASE_GROUNDING:512, OPEN_VOCABULARY_DETECTION:512, OCR:512, REFERRING_EXPRESSION_SEGMENTATION:1024, REGION_TO_SEGMENTATION:1024, OCR_WITH_REGION:1024 };
+      const generatedIds = await model.generate({ ...visionInputs, ...textInputs, max_new_tokens:MAX_TOKENS[task]||512, num_beams:3, do_sample:false });
       const generatedText = tokenizer.batch_decode(generatedIds, { skip_special_tokens:false })[0];
       let parsed;
       try {
