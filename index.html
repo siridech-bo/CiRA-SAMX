@@ -2307,7 +2307,16 @@ self.onmessage = async (e) => {
       }
       const generatedIds = await model.generate({ ...visionInputs, ...textInputs, max_new_tokens:1024, num_beams:3, do_sample:false });
       const generatedText = tokenizer.batch_decode(generatedIds, { skip_special_tokens:false })[0];
-      const parsed = processor.post_process_generation(generatedText, taskTag, [width, height]);
+      let parsed;
+      try {
+        parsed = processor.post_process_generation(generatedText, taskTag, [width, height]);
+      } catch(ppErr) {
+        // Some tasks (e.g. polygon-based) may not be implemented in Transformers.js yet
+        self.postMessage({ type: 'FLOR_ERROR', message: 'Post-processing not supported for <' + task + '>: ' + ppErr.message + '. Raw output shown in text panel.' });
+        // Send raw text as fallback
+        self.postMessage({ type: 'FLOR_RESULT', task, parsed: { ['<' + task + '>']: generatedText }, rawText: generatedText, genTime: Math.round(performance.now() - t0), imageW: width, imageH: height });
+        return;
+      }
       const genTime = Math.round(performance.now() - t0);
       // Manually extract results — post_process_generation returns objects with
       // Tensor-like bboxes that don't survive postMessage. Stringify + parse to force plain values.
